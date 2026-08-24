@@ -1,0 +1,9 @@
+task_num,task_id,instruction,libero_plus_id,suite,category,difficulty_level
+1,pick_up_the_orange_juice_and_place_it_in_the_basket_view_0_0_100_0_0_initstate_0_noise_26,Pick the orange juice and place it in the basket,1798,libero_object,Sensor Noise,L3
+2,put_the_cream_cheese_in_the_bowl_view_0_0_100_0_0_initstate_0_noise_19,Put the cream cheese on the bowl,1753,libero_goal,Sensor Noise,L5
+3,pick_up_the_ketchup_and_place_it_in_the_basket_view_0_0_100_10_4_initstate_0,Pick the ketchup and place it in the basket,793,libero_object,Camera Viewpoints,L3
+4,pick_up_the_salad_dressing_and_place_it_in_the_basket_view_0_0_100_6_6_initstate_0,Pick the salad dressing and place it in the basket,700,libero_object,Camera Viewpoints,L5
+5,pick_up_the_black_bowl_on_the_cookie_box_and_place_it_on_the_plate_add_22,Pick the akita black bowl on the cookies box and place it on the plate,1960,libero_spatial,Objects Layout,L4
+6,turn_on_the_stove_moved_level2_sample1,Turn on the stove,2299,libero_goal,Objects Layout,L5
+7,pick_up_the_black_bowl_on_the_ramekin_and_place_it_on_the_plate_view_0_0_100_0_0_initstate_136,Pick the akita black bowl on the ramekin and place it on the plate,432,libero_spatial,Robot Initial States,L4
+8,pick_up_the_black_bowl_between_the_plate_and_the_ramekin_and_place_it_on_the_plate_view_0_0_100_0_0_initstate_171,Pick the akita black bowl between the plate and the ramekin and place it on the plate,267,libero_spatial,Robot Initial States,L4

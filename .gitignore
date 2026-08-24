@@ -1,0 +1,10 @@
+__pycache__/
+*.pyc
+results/
+venv/
+env.sh
+LIBERO-plus/
+LIBERO/
+assets.zip
+env_train.sh
+requirements-train.lock.txt

@@ -1,0 +1,88 @@
+diff --git a/src/lerobot/scripts/lerobot_train.py b/src/lerobot/scripts/lerobot_train.py
+index 04d43d91..ea2c490d 100644
+--- a/src/lerobot/scripts/lerobot_train.py
++++ b/src/lerobot/scripts/lerobot_train.py
+@@ -15,6 +15,7 @@
+ # limitations under the License.
+ import dataclasses
+ import logging
++import os
+ import time
+ from contextlib import nullcontext
+ from pprint import pformat
+@@ -135,8 +136,10 @@ def update_policy(
+ 
+     optimizer.zero_grad()
+ 
+-    # Step through pytorch scheduler at every batch instead of epoch
+-    if lr_scheduler is not None:
++    # Step through pytorch scheduler only on optimizer-sync micro-steps so the
++    # schedule advances per effective optimizer step (not per micro-step) when
++    # gradient accumulation is enabled.
++    if lr_scheduler is not None and accelerator.sync_gradients:
+         lr_scheduler.step()
+ 
+     # Update internal buffers if policy has update method
+@@ -180,10 +183,16 @@ def train(cfg: TrainPipelineConfig, accelerator: Accelerator | None = None):
+         # Accelerate auto-detects the device based on the available hardware and ignores the policy.device setting.
+         # Force the device to be CPU when policy.device is set to CPU.
+         force_cpu = cfg.policy.device == "cpu"
++        # Gradient accumulation via env var (lerobot CLI doesn't expose it).
++        # Setting LEROBOT_GRAD_ACCUM=N makes Accelerator perform optimizer steps every
++        # N forward+backward passes. cfg.steps is interpreted as effective optimizer
++        # steps (not micro-steps).
++        _grad_accum = int(os.environ.get("LEROBOT_GRAD_ACCUM", "1"))
+         accelerator = Accelerator(
+             step_scheduler_with_optimizer=False,
+             kwargs_handlers=[ddp_kwargs],
+             cpu=force_cpu,
++            gradient_accumulation_steps=_grad_accum,
+         )
+ 
+     init_logging(accelerator=accelerator)
+@@ -404,25 +413,32 @@ def train(cfg: TrainPipelineConfig, accelerator: Accelerator | None = None):
+             f"Start offline training on a fixed dataset, with effective batch size: {effective_batch_size}"
+         )
+ 
+-    for _ in range(step, cfg.steps):
++    # `step` counts effective optimizer steps. With gradient accumulation, one
++    # effective step corresponds to N micro-steps; we only increment `step` (and
++    # check log/save/eval) on the sync micro-step, where the optimizer actually
++    # fires.
++    while step < cfg.steps:
+         start_time = time.perf_counter()
+         batch = next(dl_iter)
+         batch = preprocessor(batch)
+         train_tracker.dataloading_s = time.perf_counter() - start_time
+ 
+-        train_tracker, output_dict = update_policy(
+-            train_tracker,
+-            policy,
+-            batch,
+-            optimizer,
+-            cfg.optimizer.grad_clip_norm,
+-            accelerator=accelerator,
+-            lr_scheduler=lr_scheduler,
+-            rabc_weights_provider=rabc_weights,
+-        )
++        with accelerator.accumulate(policy):
++            train_tracker, output_dict = update_policy(
++                train_tracker,
++                policy,
++                batch,
++                optimizer,
++                cfg.optimizer.grad_clip_norm,
++                accelerator=accelerator,
++                lr_scheduler=lr_scheduler,
++                rabc_weights_provider=rabc_weights,
++            )
++
++        # Only treat the optimizer-sync micro-step as a real "step" for log/save/eval.
++        if not accelerator.sync_gradients:
++            continue
+ 
+-        # Note: eval and checkpoint happens *after* the `step`th training update has completed, so we
+-        # increment `step` here.
+         step += 1
+         if is_main_process:
+             progbar.update(1)

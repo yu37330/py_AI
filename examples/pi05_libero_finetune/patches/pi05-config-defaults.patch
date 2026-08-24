@@ -1,0 +1,17 @@
+diff --git a/src/lerobot/policies/pi05/configuration_pi05.py b/src/lerobot/policies/pi05/configuration_pi05.py
+index b96e6d1..5ca07ac 100644
+--- a/src/lerobot/policies/pi05/configuration_pi05.py
++++ b/src/lerobot/policies/pi05/configuration_pi05.py
+@@ -50,6 +50,12 @@ class PI05Config(PreTrainedConfig):
+     min_period: float = 4e-3
+     max_period: float = 4.0
+ 
++    # Opt PI0.5 into EpisodeAwareSampler (lerobot_train.py gates it on this attribute
++    # existing). Drops the last chunk_size-1 frames of each episode so that the
++    # action chunk never runs past the episode end: pi0.5's loss does not consult
++    # `action_is_pad`, and out-of-range targets are the final action repeated.
++    drop_n_last_frames: int = 49  # chunk_size - 1 = 49
++
+     # Real-Time Chunking (RTC) configuration
+     rtc_config: RTCConfig | None = None
+ 
