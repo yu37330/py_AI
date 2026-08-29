@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import argparse
 import json
-from collections import defaultdict
 from pathlib import Path
 from typing import Any
 
@@ -171,10 +170,12 @@ def main() -> int:
             avg_frames=("frames", "mean"),
             avg_duration_sec_approx=("duration_sec_approx", "mean"),
         ).reset_index()
-        sources = grouped["source"].apply(
-            lambda s: json.dumps(sorted(set(map(str, s))), ensure_ascii=False)
+        sources = (
+            grouped["source"]
+            .apply(lambda s: json.dumps(sorted(set(map(str, s))), ensure_ascii=False))
+            .reset_index(name="sources")
         )
-        task_df = task_df.merge(sources.rename("sources"), on="task_name", how="left")
+        task_df = task_df.merge(sources, on="task_name", how="left")
         task_df = task_df.sort_values(["episodes", "task_name"], ascending=[False, True])
 
     args.out.mkdir(parents=True, exist_ok=True)
