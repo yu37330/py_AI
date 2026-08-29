@@ -2,7 +2,7 @@
 
 ## 目的
 
-本書は、PARC2026 本戦配布リポジトリの実装、公式資料 `PARC2026開発コンペティション_本選_v1.1`、および公式 Slack の本選アナウンスを突き合わせ、確認できた事実と攻略上の示唆を分けて整理したものです。資料とSlackで差分がある場合は、より新しい運営アナウンスを優先します。学習用GPUは RTX PRO 6000 Blackwell、採点は単一 NVIDIA L4 24GB です。
+本書は、P PARC2026 本戦配布リポジトリの実装、公式資料 `PARC2026開発コンペティション_本選_v1.1`、および公式 Slack の本選アナウンスを突き合わせ、確認できた事実と攻略上の示唆を分けて整理したものです。資料とSlackで差分がある場合は、より新しい運営アナウンスを優先します。学習用GPUは RTX PRO 6000 Blackwell、採点は単一 NVIDIA L4 24GB です。
 
 ---
 
@@ -199,6 +199,93 @@ step 5000 checkpoint が配布 baseline で、公式参考 leaderboard score は
 
 Track 3 が0であることと逆操作設計の開示を合わせると、**inverse-task fine-tuning は本選1で最も明確な改善仮説の一つ**です。
 
+#### 1.9.1 2026-08-29 運営GPU / Dockerでのbaseline実測
+
+運営GPU環境上で、配布済み `pi05_step005000_submission_py310.zip` を運営Dockerに通し、提出物の静的検査から Track 1 rollout まで end-to-end で確認しました。
+
+実測環境:
+
+- 学習ホストGPU: NVIDIA RTX PRO 6000 Blackwell Server Edition
+- VRAM: 97,887 MiB
+- Driver: 595.91.07
+- 運営Docker内: Python 3.10.12 / torch 2.11.0+cu130 / CUDA利用可
+- Dockerログ上の transformers: 5.3.0
+- Dockerログ上の numpy: 2.2.6
+- baseline zip: 8.3GB
+
+提出zipの静的検査:
+
+```text
+python validate_submission.py /dataset/pi05_step005000_submission_py310.zip --static
+バリデーション結果: PASS  (errors=0, warnings=0)
+```
+
+`/dataset` は配布用read-only領域のため、実測時は zip を `/data` にコピーしてから `evaluate.py` に渡しました。
+
+最初の評価では server startup の120秒上限に到達しました。ログでは checkpoint 自体は読み込めていたため、モデル破損ではなく初期化 / warm-up 側の一時的遅延として切り分けました。診断目的で `SERVER_TIMEOUT=300` とした再試行では以下を確認しました。
+
+- checkpoint load: 6.1秒
+- warm-up inference: 30.2秒
+- server ready: 41秒
+- Track 1 evaluation: 完走
+- Track 1 local overall score: 0.500
+- evaluation本体: 62.3秒
+- コマンド全体: 6分16.5秒
+
+さらに**新しいDockerコンテナ**を起動し、`SERVER_TIMEOUT` を変更せず標準の120秒上限で再確認したところ:
+
+- checkpoint load: 6.1秒
+- warm-up inference: 0.6秒
+- server ready: 11秒
+- Track 1 local overall score: 0.500
+- evaluation本体: 45.6秒
+- コマンド全体: 4分19.6秒
+- `base_passed: true`
+
+したがって、配布baselineは運営Docker上で少なくとも Track 1 の end-to-end 経路を正常完走できます。最初の120秒timeoutは再現しなかったため恒常的なsubmission不具合とは見なしません。ただし新しいDockerでもホスト側CUDA/JITキャッシュ等は残り得るため、最終提出候補では clean-start を複数回確認します。
+
+Track 1 のローカル評価は4 task × 1 episodeでした。
+
+| task | success | steps to success | episode time |
+|---|---:|---:|---:|
+| black bowl in top drawer → plate | 0 | - | 18.46s |
+| tomato sauce → basket | 1 | 149 | 6.29s |
+| milk → basket | 0 | - | 11.84s |
+| bowl → stove | 1 | 69 | 3.26s |
+
+集約値:
+
+- mean success rate: 0.500
+- success時の平均steps: 109.0
+- mean episode time: 9.963秒
+- mean Cartesian path length: 1.297
+- mean joint path length: 4.948
+- mean orientation path length: 1.518 rad
+- mean avg Cartesian jerk: 5.360
+- mean RMS Cartesian jerk: 9.597
+- mean avg joint jerk: 17.969
+- mean RMS joint jerk: 31.230
+
+重要な解釈:
+
+- この `0.500` は公開ローカル scorer の**平均成功率**であり、公式leaderboard参考値 `0.286` と直接比較してはいけない。
+- ローカル配布版には本番の `total_score_config.json` / `normalization_config.json` が含まれないため、警告して内蔵defaultへfallbackするのは想定どおり。
+- JSONの `metadata.gpu_device: cpu` は評価環境側configの値であり、policy serverログでは `cuda True` を確認しているため、π0.5推論がCPUのみで走ったことを意味しない。
+- ZIP検査・展開・依存処理がコマンド全体時間の大きな割合を占める。最終候補はmodel latencyだけでなく「依存インストールから評価完了まで1h」のwall-clockでも測る。
+
+#### 1.9.2 π0.5 学習環境セットアップの実測状況
+
+baseline評価後、ホスト側 `examples/pi05_libero_finetune` で `scripts/setup_train.sh` を開始しました。2026-08-29時点で以下まで実測確認済みです。
+
+- Python 3.10.12: OK
+- FFmpeg 4.4.2: 導入済み
+- LeRobot: `v0.4.4` を取得
+- `grad-accum-env-var.patch`: 適用成功
+- `pi05-config-defaults.patch`: 適用成功
+- 学習専用venv + 依存インストール: 実行中
+
+まだ `setup_train.sh` の最終動作確認、20 step smoke training、LoRA checkpoint保存、merge、再submission評価までは完了していません。ここは成功確認後に追記します。
+
 ### 1.10 Sandbox / offline / submission 制約
 
 評価中は外部通信が遮断されるため、モデル重み等はzipに同梱します。配布リポジトリ実装からも、評価側秘密領域へのアクセス制限、requirementsの外部URL禁止、zip validation等が確認できます。
@@ -309,10 +396,18 @@ success rate を落とさないことをA/B testします。task名やsceneに�
 
 ### Gate A: baseline再現 5h
 
-- π0.5 official checkpointを配布Dockerで検証
-- Track1/2/3 smoke evaluation
-- latency / VRAM計測
-- submission zip validation
+完了:
+
+- π0.5 step5000 zip の static validation PASS
+- 運営Dockerで Track1 end-to-end PASS
+- fresh Dockerで標準120秒 server startup制限をPASS（11秒）
+- Track1 4 task × 1 episode のローカル基準値を記録
+
+残り:
+
+- Track2 / Track3 smoke evaluation
+- inference latency / VRAM の追加計測
+- 最終採点基準であるL4 24GB上の実測はleaderboard評価で確認
 
 ### Gate B: Track3 inverse pipeline PoC 8h
 
@@ -383,14 +478,15 @@ Track1/2性能を維持しつつTrack3を立ち上げる比率を探索します
 
 ## 6. 現時点の優先順位
 
-1. **Track3 inverse-task generator / evaluation を作る** — Slack開示で最も大きく変わった点
-2. **π0.5 official baselineを完全再現** — 0.286 / 0.165 / 0.000を基準化
-3. **inverse dataでπ0.5を短時間fine-tuneしTrack3が0から改善するか検証**
-4. **OpenVLA-OFT+を本選I/Oへ接続しL4 benchmark**
-5. **SmolVLAを同条件比較**
-6. 勝ちモデルに forward + inverse + LIBERO-plus を混ぜて本学習
-7. successを落とさない範囲でtrajectory scoring改善
-8. リーダーボードで動作確認後、最終評価フォームへ提出
+1. **π0.5 学習環境setupを完了し、20 step smoke → LoRA merge → submission再評価まで通す**
+2. **Track3 inverse-task generator / evaluation を作る** — Slack開示で最も大きく変わった点
+3. Track2 / Track3 でも official baseline の smoke evaluation を取り、Track別のローカル基準値を揃える
+4. **inverse dataでπ0.5を短時間fine-tuneしTrack3が0から改善するか検証**
+5. **OpenVLA-OFT+を本選I/Oへ接続しL4 benchmark**
+6. **SmolVLAを同条件比較**
+7. 勝ちモデルに forward + inverse + LIBERO-plus を混ぜて本学習
+8. successを落とさない範囲でtrajectory scoring改善
+9. リーダーボードで動作確認後、最終評価フォームへ提出
 
 ---
 
@@ -403,8 +499,9 @@ Track1/2性能を維持しつつTrack3を立ち上げる比率を探索します
 3. 本戦配布リポジトリ実装
 4. 公式Q&A
 5. Slack参加者の実測報告（補助Evidence）
+6. 自分たちの運営GPU / 運営Docker実測ログ
 
-参加者の推測・雑談は公式仕様とは区別します。特に今回の Track3 逆操作については参加者推測ではなく、2026/8/28の運営公式アナウンスによる確定情報として扱います。
+参加者の推測・雑談は公式仕様とは区別します。特に今回の Track3 逆操作については参加者推測ではなく、2026/8/28の運営公式アナウンスによる確定情報として扱います。ローカル実測値も公式leaderboard値とは区別し、実験条件とepisode数を併記します。
 
 ---
 
@@ -412,13 +509,14 @@ Track1/2性能を維持しつつTrack3を立ち上げる比率を探索します
 
 最優先実装を以下に変更します。
 
-1. `Track3 inverse task manifest`
-2. BDDL / init region から逆操作タスクを構成する generator の仕様調査
-3. inverse demonstration 生成方式のPoC
-4. forward / inverse 両対応 Dataset Manifest
-5. π0.5 inverse fine-tune experiment
-6. Track3 local evaluation runner
-7. L4 latency / VRAM benchmark
-8. 最終submission build + validation pipeline
+1. π0.5 training smoke / merge / submission round-trip
+2. `Track3 inverse task manifest`
+3. BDDL / init region から逆操作タスクを構成する generator の仕様調査
+4. inverse demonstration 生成方式のPoC
+5. forward / inverse 両対応 Dataset Manifest
+6. π0.5 inverse fine-tune experiment
+7. Track3 local evaluation runner
+8. L4 latency / VRAM benchmark
+9. 最終submission build + validation pipeline
 
-Track3の設計が判明したため、単に大きなVLAへ切り替えるより、**既存LIBEROスキルを逆操作へ転用できる学習データ設計**が本選1で最も高い情報価値を持つ実験です。
+Track3の設計が判明したため、単に大きなVLAへ切り替えるより、**既存LIBEROスキルを逆操作へ転用できる学習データ設計**が本選1で最も高い情報価値を持つ実験です。一方で提出経路そのものはTrack1で実測完走済みなので、次は学習→merge→submissionの往復経路を最短で確立します。
