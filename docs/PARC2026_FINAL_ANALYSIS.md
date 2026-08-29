@@ -1,345 +1,325 @@
-# PARC2026 本戦環境 分析メモ
+# PARC2026 本戦環境・公式ルール v1.1 分析メモ
 
 ## 目的
 
-本書は、PARC2026 本戦の配布リポジトリに含まれる README、評価パイプライン、提出バリデータ、提出テンプレート、参考実装を読み、確認できた事実と、そこから導く実装・学習上の示唆を分けて整理したものです。
+本書は、PARC2026 本戦配布リポジトリの実装と、公式資料 `PARC2026開発コンペティション_本選_v1.1` を突き合わせ、確認できた事実と攻略上の示唆を分けて整理したものです。実装と公式資料が異なるように見える場合は、役割を分けて解釈します。学習用GPUは RTX PRO 6000 Blackwell、採点は単一 NVIDIA L4 24GB です。
 
 ---
 
-## 1. 確認できた事実
+## 1. 公式 v1.1 で確定した重要事項
 
-### 1.1 本番採点環境
+### 1.1 スケジュールと勝ち残り
 
-本番は GPU コンテナ上で実行され、配布 Dockerfile は本番と同一の依存構成を再現します。
+- 本選1: 2026/8/24 18:00 ～ 9/17 23:59
+- 本選2: 9/28 ～ 10/22（予定）
+- 本選3: 10/28 ～ 11/24（予定）
+- 本選1: 200人 → 100人
+- 本選2: 100人 → 50人
+- 本選3は最終評価ランキングとレポートを踏まえて優秀者を選出
 
-| 項目 | 確認値 |
+### 1.2 Track
+
+| Track | 意味 |
 |---|---|
-| GPU | NVIDIA L4 |
-| OS | Ubuntu 22.04.5 LTS |
-| Base image | `nvidia/cuda:13.0.3-cudnn-devel-ubuntu22.04` |
-| Python | 3.10.12 |
-| CUDA | 13.0 |
-| cuDNN | 9.14.0 |
-| NCCL | 2.28.3+cuda13.0 |
-| PyTorch | 2.11.0+cu130 |
-| Triton | 3.6.0 |
-| NVIDIA driver | R580 系 |
-| Rendering | `MUJOCO_GL=EGL` |
+| Track 1 | 同一タスク・同一ドメイン |
+| Track 2 | 同一タスク・未知ドメイン。位置・視点・ノイズ変更等 |
+| Track 3 | 既知タスクの組み合わせ・未知ドメイン。言語指示で新規構成されたタスク |
 
-LIBERO-plus、LIBERO、assets もコミット固定です。
+Trackごとに別モデルを提出しても、同一モデルを提出してもよい。
 
-### 1.2 Track 構成
+### 1.3 評価式は success rate 単独ではない
 
-| Track | Suite | 意味 |
-|---|---|---|
-| Track 1 | `libero_t1` | 同一タスク・同一ドメイン |
-| Track 2 | `libero_t2` | 同一タスク・未知ドメイン |
-| Track 3 | `libero_t3` | 既知タスク組み合わせ・未知ドメイン |
+公式 v1.1 では、成功判定と衝突判定をゲートとして、以下の正規化済み指標を重み付きで評価することが明示されています。
 
-本番では公開 example とは別の非公開タスクを含むタスクセットで採点されます。
+- time / steps
+- jerk
+- SPARC
+- trajectory length
+- EEF rotation
+- collision penalty
 
-### 1.3 観測仕様
+概念的には以下です。
 
-評価側からポリシーへ送られる観測キーは以下です。
+`Total Score = average(success * (1 - collision_penalty) * smooth_metrics)`
 
-- `agentview_image`
-- `robot0_eye_in_hand_image`
-- `robot0_joint_pos`
-- `robot0_eef_pos`
-- `robot0_eef_quat`
-- `robot0_gripper_qpos`
+`smooth_metrics` は time, jerk, SPARC, trajectory, rotation の非公開重み付き正規化値です。正規化式と重みは非公開です。
 
-画像解像度の既定値は 128 x 128 です。
+したがって、公開ローカル scorer の success-rate ベース `overall_score` は開発用指標であり、本番スコアそのものではありません。成功率を最重要ゲートとして維持しつつ、成功軌道の滑らかさ・短さ・安全性も改善対象です。
 
-### 1.4 Action 仕様
+Track 1/2/3 の Total Score の合計が各本選スコアです。最終評価フォームに未提出の Track は 0 点です。
 
-`POST /act` の応答は `float32`、shape `(7,)` である必要があります。
+### 1.4 学習GPUと採点GPUは別
+
+#### 配布学習環境
+
+- NVIDIA RTX PRO 6000 Blackwell
+- 本選1: 60 GPU時間
+- 本選2: 75 GPU時間
+- 本選3: 120 GPU時間
+- ステージごとに時間はリセット、繰越なし
+- Notebook は完全アイドル1時間で停止
+- 起動から12時間で自動停止
+
+#### 採点環境
+
+- 単一 NVIDIA L4
+- VRAM 24GB
+- 1 inference 10秒以内
+- リーダーボードの Track 評価は依存インストールから評価完了まで wall-clock 1時間以内
+
+結論: RTX PRO 6000 Blackwell の大容量VRAMを前提に提出モデルを設計してはいけません。学習はBlackwell、最終推論設計はL4 24GB基準です。
+
+### 1.5 採点Docker
+
+公式資料では、採点環境と同一構成の Docker（CUDA 13.0、PyTorch 2.11.0+cu130 等）が配布GPU環境に用意され、提出zipの end-to-end 検証をそのDocker内で行うことが推奨されています。
+
+独自Dockerはサポート対象外です。提出前検証は運営配布Dockerを正とします。
+
+### 1.6 Policy server interface
+
+`submission_template/policy_server.py` の `MyPolicy` を変更します。
+
+- `__init__`: `model_weights/` からモデルをロード
+- `get_action(obs)`: 観測から action を生成
+- `reset(instruction="")`: エピソード開始時に言語指示を受け、キャッシュ・履歴等をクリア
+
+Action:
 
 ```text
+float32 shape (7,)
 [dx, dy, dz, droll, dpitch, dyaw, gripper]
 ```
 
-NaN / Inf は許容されません。
+1リクエスト10秒以内です。
 
-### 1.5 HTTP Interface
+### 1.7 提出とリーダーボード
 
-提出物は HTTP ポリシーサーバーとして実装し、以下のエンドポイントを持つ必要があります。
+- リーダーボードは Track ごとに1日1回採点可能
+- エラーでも回数を消費
+- アップロード完了時刻が提出時刻
+- 最終評価はリーダーボード提出とは別の専用フォーム
+- Track 1/2/3 の3フォームすべてに提出する
+- 期限内なら最終フォームは何度でも差し替え可能で、最後にアップロード完了したzipが対象
+- 最終評価ではリーダーボードよりタスク種類・Episode数を増やす
+- 最終提出枠では動作確認されず、エラー救済は基本なし
 
-- `GET /health`
-- `POST /reset`
-- `POST /act`
+本選1最終提出期限は 9/17 23:59（アップロード完了基準）。
 
-`reset()` はエピソードごとに呼ばれます。action chunk cache、language instruction state、history buffer 等のエピソード固有状態はここでクリアする必要があります。
+### 1.8 データセット
 
-### 1.6 Timeout
+配布環境には少なくとも以下があります。
 
-`/act` の 1 リクエストあたり timeout は 10 秒です。
+- LIBERO standard: spatial / object / goal / 10 / 90（no_noops）
+- LIBERO-plus: camera viewpoint、lighting、texture 等の摂動データ
+- LeRobot 統合20Hz `libero_combined_20hz`
+- LeRobot v2.1 / v3.0 系
 
-評価 config には以下も定義されています。
+LIBERO / LIBERO-plus データの学習利用は公式Q&Aで許可されています。また配布ローカル評価環境を使った強化学習も禁止されていません。
 
-- max steps / episode: 300
-- 配布環境の既定評価 episode 数: 20
-- episode timeout: 120 秒
-- GPU time limit: 3600 秒
+### 1.9 π0.5 baseline
 
-本番の episode 数は公開されていません。
+公式配布 `examples/pi05_libero_finetune` には以下が含まれます。
 
-### 1.7 提出サイズ
+- 学習環境セットアップ
+- LeRobot patch（gradient accumulation 等）
+- π0.5 LoRA training
+- LoRA merge script
+- submission policy server example
 
-- zip 上限: 20 GB
-- 展開後上限: 40 GB
-- model size 設定値: 20 GB
-- エントリ数上限: 200,000
+step 5000 checkpoint が配布 baseline で、公式参考 leaderboard score は:
 
-巨大 zip や異常な圧縮率は validation で拒否されます。
+| Track | Score |
+|---|---:|
+| Track 1 | 0.286 |
+| Track 2 | 0.165 |
+| Track 3 | 0.000 |
 
-### 1.8 requirements.txt 制約
+これはモデル選定時の最低比較ラインとして扱います。
 
-採点時は提出専用 venv が `--system-site-packages` 付きで作成されます。そのため、本番イメージにプリインストール済みのライブラリは requirements に再記載しなくても利用できます。
+### 1.10 Sandbox / offline / submission 制約
 
-一方、以下は禁止されています。
+評価中は外部通信が遮断されるため、モデル重み等はzipに同梱します。配布リポジトリ実装からも、評価側秘密領域へのアクセス制限、requirementsの外部URL禁止、zip validation等が確認できます。
 
-- `git+https://...`
-- `http://...`, `https://...` 等の外部 URL
-- `--index-url`
-- `--extra-index-url`
-- `--find-links`
-- editable install
-- 外部 requirement / constraint の参照
-
-つまり、採点時のネットワーク取得を前提にした依存やモデルロードは不可です。
-
-### 1.9 Sandbox
-
-評価時、参加者の policy server は可能な場合 `nobody` 等の非特権ユーザーに降格して起動されます。また以下の評価側秘密領域は filesystem hardening の対象です。
-
-- `/workspace/LIBERO-plus`
-- `/workspace/compe`
-- `/workspace/pipeline`
-- `/workspace/scoring_config.json`
-- `/workspace/total_score_config.json`
-- `/workspace/normalization_config.json`
-
-提出コードから hidden task や scoring config を覗く前提の実装は成立しません。
-
-### 1.10 公開ローカル scorer
-
-配布 scorer の `overall_score` は各タスク成功率の平均、すなわち track の平均 success rate です。
-
-軌道メトリクスとして以下も計算されます。
-
-- Cartesian path length
-- joint path length
-- orientation path length
-- average / RMS Cartesian jerk
-- average / RMS joint jerk
-- average steps to success
-- episode time
-
-ただし README で明記されている通り、リーダーボード最終順位を決定する scoring config は配布されていません。したがってローカル `overall_score` と本番最終スコアを同一視してはいけません。
-
-### 1.11 運営の参考モデル
-
-運営は参考例として少なくとも以下を配布しています。
-
-1. SmolVLA LoRA
-   - `lerobot/smolvla_libero_plus`
-   - LIBERO-plus Spatial 10 task
-   - 50 episode
-   - 3,000 training steps
-   - Colab T4 を想定した最小構成
-
-2. pi0.5 LoRA
-   - LIBERO 系データで LoRA fine-tune
-   - LoRA を merge して submission に同梱
-   - LeRobot v0.4.4 固定
-
-運営自身も「training environment と evaluation environment を分ける」「本番は offline submission」と明確に設計しています。
+提出物は自己完結させます。
 
 ---
 
-## 2. ここから導ける実装上の示唆
+## 2. 禁止事項と許可される改善
 
-以下は上記仕様からの推論・提案です。
+### 禁止
 
-### 2.1 最優先は success rate
+- 外部・手続き的な task-level planner（CaPX等）
+- task固有FSM
+- hard-coded action sequence
+- scene ID / task ID / evaluation seed をキーとした action table
+- 成功条件・報酬を直接参照する planner
+- 評価環境専用 if 文
+- hidden task fingerprinting
+- 学習済みモデルを実質使用しない fallback policy
+- nested archive、zip bomb
+- symlink / hardlink
+- path traversal
+- 不要な難読化
 
-公開 scorer では track score は task success rate の単純平均です。最終 scoring config は非公開ですが、少なくとも成功しない軌道の smoothness を改善しても勝ち筋にはなりません。
+### 公式Q&Aで許可
 
-優先順位は原則として次です。
+- 全タスク共通・決定論的な action 後段補正
+- 配布ローカル評価環境を使った強化学習
+- LIBERO / LIBERO-plus データ学習
+- `lerobot` を requirements.txt に記載
 
-1. 成功率
-2. 未知 domain に対する robustness
-3. task composition robustness
-4. 推論安定性 / timeout 回避
-5. 軌道品質
+この境界は重要です。後処理を入れるなら task-specific rule ではなく、全タスク共通の安全・滑らかさ改善として設計します。
 
-### 2.2 Track 2 / 3 対策が本戦の差になりやすい
+---
 
-Track 1 は同一 task・同一 domain ですが、Track 2 は未知 domain、Track 3 は既知 task の組み合わせ + 未知 domain です。
+## 3. 攻略方針のアップデート
 
-したがって単純な train task memorization より、以下の方が価値が高い可能性があります。
+### 3.1 最適化目標
 
-- appearance / texture / lighting augmentation
-- camera perturbation
-- object placement variation
+以前の「success rate 最優先」は方向としては維持しますが、公式 v1.1 により次の二段階最適化に修正します。
+
+1. 成功ゲートを最大化する
+2. 成功を落とさない範囲で collision / jerk / SPARC / steps / trajectory / rotation を改善する
+
+成功しなければゲートでスコアを失うため、滑らかさだけを先に最適化するのは誤りです。一方、同程度の成功率なら、短く滑らかで衝突しないpolicyが本番では有利です。
+
+### 3.2 Track別戦略
+
+#### Track 1
+
+- task competence と安定性
+- action normalization / gripper convention の完全一致
+- 成功後の不要動作を抑え steps / trajectory を短縮
+
+#### Track 2
+
+- LIBERO-plus を中心に visual domain robustness を強化
+- camera / lighting / texture / position variation
+- agentview と wrist image の使い分け検証
+
+#### Track 3
+
+baseline が 0.000 なので最大の差別化候補です。
+
+- compositional language understanding
+- multi-task / skill composition
 - instruction paraphrase
-- task-balanced sampling
-- composition を意識した multi-task learning
+- history / action chunk の設計
+- standard LIBERO と LIBERO-plus を混ぜた skill coverage
 
-### 2.3 128x128 を本番条件として最適化する
+ただし本選1は3 Track合算なので、Track3だけに賭けず Track1/2 の確実な点も取りに行きます。
 
-参考 notebook の 256x256 evaluation と本番 128x128 は条件が異なります。
+### 3.3 モデル選定
 
-VLA の image preprocessing を 256x256 前提のまま考えるのではなく、128x128 observation からモデル入力へ resize した時の情報損失を含めて検証すべきです。
+比較対象を最低限以下に固定します。
 
-特に小物体操作では eye-in-hand image の寄与を再評価する価値があります。
+1. π0.5 official baseline
+2. SmolVLA
+3. OpenVLA-OFT+
 
-### 2.4 Action chunking は有力だが reset 処理が必須
+比較条件:
 
-1 action request が 10 秒以内なら、毎 step 大型モデルをフル forward するより action chunk を生成してキャッシュする方法は latency 面で有利です。
-
-ただし episode 切替時に `/reset` が呼ばれるため、chunk cache、instruction、history を確実にリセットする必要があります。
-
-### 2.5 L4 を基準に推論設計する
-
-モデル選定は「GPU に載るか」だけでは不十分です。
-
-本番では L4 1枚上で、ロード後の `/act` を 10 秒以内に安定して返す必要があります。
-
-したがって確認対象は最低でも以下です。
-
-- cold start model load time
+- 同一のTrack evaluation
+- L4 24GBで実測
+- success / official smooth metrics相当
+- p50/p95/p99 inference latency
 - VRAM peak
-- steady-state `/act` latency
-- action chunk length
-- quantization の有無
-- FlashAttention / SDPA 互換性
-- PyTorch 2.11 + CUDA13 互換性
+- package size
+- task別failure mode
 
-### 2.6 OpenVLA-OFT+ はそのままではなく本戦 I/O adapter が重要
+RTX PRO 6000 Blackwellで動くことは採用条件ではありません。L4 24GBで安定動作することが必須条件です。
 
-OpenVLA 系を使う場合、本戦の observation / action interface に合わせた変換が必要です。
+### 3.4 推論後段補正
 
-最低限、次を明示的に管理するべきです。
+公式Q&Aにより、全タスク共通・決定論的な action 後段補正は利用可能です。候補:
 
-- agentview / wrist image の mapping
-- state vector の mapping
-- quaternion / rotation representation
-- action normalization / unnormalization
-- gripper convention
-- action chunk slicing
-- instruction encoding
+- action magnitude clipping
+- delta translation / rotation のrate limit
+- temporal smoothing
+- gripper hysteresis
+- 異常値防止
 
-本戦では normalization config が評価側の秘密領域として隠されるため、submission は自分の training 時 normalization 情報を完全に同梱して自己完結させる必要があります。
+ただし success rate を落とさないことをA/B testで確認します。task名やsceneに依存する条件分岐は入れません。
 
 ---
 
-## 3. 推奨攻略ロードマップ
+## 4. GPU時間60hを前提にした本選1実験計画
 
-### Phase 0: Submission infra を先に固定
+60hを無計画なfull trainingに使わず、stage-gate方式にします。
 
-モデル改善より先に、最低限の submission server を本番互換に固定する。
+### Gate A: baseline再現 6h
 
-Acceptance criteria:
+- π0.5 official checkpointを配布Dockerで検証
+- Track1/2/3 smoke evaluation
+- latency / VRAM計測
+- submission zip validation
 
-- `validate_submission.py --static` PASS
-- dynamic validation PASS
+### Gate B: 候補モデル比較 10h
+
+- π0.5
+- SmolVLA
+- OpenVLA-OFT+
+
+短時間fine-tuneまたは既存checkpointで比較し、明確に弱い候補を落とします。
+
+### Gate C: 勝ちモデル学習 28h
+
+- LIBERO + LIBERO-plus mix
+- Track2 augmentation
+- Track3 compositionを意識したsampling
+- checkpointを複数保存
+
+### Gate D: scoring改善 8h
+
+成功率上位checkpointに対してのみ、共通action post-processingをA/B testします。
+
+### Gate E: 最終検証 8h
+
+- 運営Dockerでclean end-to-end
+- 3 Track zipを作成
+- `validate_submission.py`
+- dependency installから評価完了まで確認
+- 10 sec/inference margin確認
+- hash / model metadata記録
+
+合計60h。実験が早く終わればGate Cへ戻します。
+
+---
+
+## 5. Submission acceptance criteria
+
+- model weightsをzip内に同梱
+- 外部通信不要
+- L4 24GBで起動
 - `/health` PASS
 - `/reset` PASS
-- `/act` float32 `(7,)`
-- NaN / Inf なし
-- `/act` p99 latency < 10 sec
-- Docker 本番互換環境で起動
-
-### Phase 1: baseline を本戦評価器で再測定
-
-比較する候補例:
-
-- SmolVLA baseline / fine-tune
-- pi0.5 LoRA
-- 既存 OpenVLA-OFT+ checkpoint
-
-すべて同じ `python -m pipeline` 条件で比較する。
-
-記録する指標:
-
-- Track 1 / 2 / 3 success rate
-- task 別 success rate
-- latency
-- VRAM
-- steps to success
-- failed episode の failure mode
-
-### Phase 2: Track 2 robustness
-
-未知 domain に対して augmentation を重点的に導入する。
-
-優先候補:
-
-- color / brightness / contrast
-- texture randomization
-- object pose variation
-- camera perturbation
-- instruction paraphrase
-
-### Phase 3: Track 3 composition
-
-単一 task の性能だけでなく、既知 skill の組み合わせへ汎化できる training mix を設計する。
-
-- balanced multi-task sampling
-- compositional instruction
-- skill boundary を跨ぐ episode
-- history / chunk 長の検討
-
-### Phase 4: inference optimization
-
-- mixed precision
-- SDPA / FlashAttention
-- model weight merge
-- unnecessary dependency removal
-- action chunking
-- model initialization cache
-
-目標は success rate を落とさず latency margin を十分確保すること。
-
-### Phase 5: submission hardening
-
-最終 zip について以下を毎回自動確認する。
-
-- zip < 20GB
-- external dependency なし
-- model weights 全同梱
-- clean venv から再現可能
-- Docker 本番環境で end-to-end evaluate
-- Track 1 / 2 / 3 smoke test
+- `/act` = float32 `(7,)`
+- NaN / Infなし
+- inference < 10 sec、目標p99は十分な余裕を持たせる
+- Track全体wall-clock < 1h
+- 運営配布Dockerでend-to-end PASS
+- Track1/2/3を最終フォームへすべて提出
+- 最終提出zipとレポート記載hashを一致させる
 
 ---
 
-## 4. 今回の重要ポイント
+## 6. 現時点の優先順位
 
-本戦では、単純に「より大きい VLA を入れる」よりも、以下の4点の掛け算で性能が決まる可能性が高いです。
-
-1. VLA 自体の能力
-2. LIBERO-plus / hidden domain への fine-tuning
-3. 本番 I/O / action normalization の整合
-4. L4 + 10秒制約内での安定推論
-
-特に Track 2 / 3 があるため、Track 1 の公開 task への過適合は危険です。
-
-本戦向けには「公開タスクを覚える」ではなく「既知 skill を未知 visual domain と composition に持ち出せる policy」を目標にするべきです。
+1. **π0.5 official baselineを完全再現** — 公式0.286 / 0.165 / 0.000を基準化
+2. **OpenVLA-OFT+を本選I/Oへadapter化してL4 benchmark**
+3. **SmolVLAを同条件benchmark**
+4. **Track2向けLIBERO-plus学習mix最適化**
+5. **Track3 composition学習を重点検証**
+6. **成功率を維持した共通action smoothing / clipping**
+7. **3 Track別checkpoint採用判断**
+8. **運営Dockerによる最終zip hardening**
 
 ---
 
-## 5. 次に実施する具体作業
+## 7. 重要な判断
 
-1. 既存 OpenVLA-OFT+ submission と本戦 `policy_server.py` interface の差分調査
-2. observation / action adapter の仕様書化
-3. 本番 L4 を想定した latency / VRAM benchmark script 作成
-4. Track 1 / 2 / 3 共通 evaluation runner 作成
-5. failure analysis 用 result parser 作成
-6. SmolVLA / pi0.5 / OpenVLA-OFT+ の同条件比較
-7. hidden-domain を意識した augmentation plan 作成
-8. 最終 submission を `validate_submission.py` と `evaluate.py` で自動検証する build script 作成
+本選1の勝ち筋は「最大モデルをRTX PRO 6000で学習すること」ではありません。
 
-この順序なら、モデル学習を先に進めて最後に提出仕様で詰まるリスクを抑えつつ、本戦の評価軸に沿って改善できます。
+**Blackwellを学習速度のために使い、L4 24GBで確実に動くVLAを作り、Track1/2の成功率を確保しながらTrack3のcomposition汎化で差を作り、最後に成功を壊さない範囲で滑らかさ・効率・安全性を改善する**、という構成が公式v1.1に最も整合します。
+
+また、リーダーボードは1日1回/Trackしか使えずエラーでも消費するため、Omnicampusをデバッグ環境にしてはいけません。ローカル評価と運営Dockerを主な開発ループとし、leaderboard submissionは仮説検証の高価な測定点として扱います。
