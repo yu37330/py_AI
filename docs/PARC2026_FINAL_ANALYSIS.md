@@ -1,8 +1,65 @@
-# PARC2026 本戦環境・公式ルール v1.1 分析メモ
+# PARC2026 本戦環境・公式ルール v1.1 + Slack 更新分析メモ
 
 ## 目的
 
-本書は、PARC2026 本戦配布リポジトリの実装と、公式資料 `PARC2026開発コンペティション_本選_v1.1` を突き合わせ、確認できた事実と攻略上の示唆を分けて整理したものです。実装と公式資料が異なるように見える場合は、役割を分けて解釈します。学習用GPUは RTX PRO 6000 Blackwell、採点は単一 NVIDIA L4 24GB です。
+本書は、PARC2026 本戦配布リポジトリの実装、公式資料 `PARC2026開発コンペティション_本選_v1.1`、および公式 Slack の本選アナウンスを突き合わせ、確認できた事実と攻略上の示唆を分けて整理したものです。資料とSlackで差分がある場合は、より新しい運営アナウンスを優先します。学習用GPUは RTX PRO 6000 Blackwell、採点は単一 NVIDIA L4 24GB です。
+
+---
+
+## 0. Slackで追加・更新された最重要事項
+
+### 0.1 Track 3 の設計が公式に開示された
+
+2026/8/28、運営は参加者向け配布物に内部検査スクリプト `check_no_leaks.py` を誤って含めていたことを公表しました。同ファイルに Track 3 の設計情報が含まれていたため、公平性確保のため Track 3 の中核設計が全参加者に公式開示されました。
+
+**Track 3 は「LIBERO の既存タスクを逆順にしたタスク」で構成されます。**
+
+例:
+
+- 順方向: A を B に置く
+- Track 3: B から A の元の位置へ戻す
+
+運営は本選1では Track 3 を変更せず、この設計のまま実施すると明言しています。一方、個別タスク内容とタスク数は引き続き非公開です。
+
+これは従来資料の「既知タスクの組み合わせ／未知ドメイン」という抽象説明より具体的であり、Track 3 戦略を大きく更新する情報です。
+
+### 0.2 Track 3 戦略を「composition」から「inverse skill generalization」へ修正
+
+従来は compositional language understanding を主軸候補としていましたが、Slack公式開示後は次を優先します。
+
+1. LIBERO既存タスクの順方向と逆方向を対にした学習データ生成
+2. goal state → original/init region への復帰操作の学習
+3. grasp / lift / transport / place の primitive を逆方向にも安定実行
+4. instruction の forward / inverse pair augmentation
+5. standard LIBERO task の BDDL / init region を使った逆操作データ生成の検討
+6. Track 3 example を用いた inverse-task evaluation suite 作成
+
+重要なのは task ID や hidden task fingerprint を使うことではなく、**学習済みモデル自身に逆操作一般化能力を持たせること**です。
+
+### 0.3 最終評価フォームが開設済み
+
+Slack公式アナウンスでは、本選1の最終評価用提出フォームが Track 1 / 2 / 3 ごとに開設されています。
+
+- 提出期限: 2026/09/17 23:59（アップロード完了基準）
+- リーダーボード提出とは別に最終評価フォームへの提出が必須
+- 期限内なら何度でも再提出可能
+- 最後にアップロード完了した zip が評価対象
+- 最終評価ではリーダーボードよりタスク種類・タスク数・評価 Episode 数を増やす
+- 最終提出枠そのものでは動作確認を行わない
+
+したがって、最終提出を validation 用に使ってはいけません。リーダーボードとローカル運営Dockerで事前に完全検証してから最終zipを置く運用にします。
+
+### 0.4 Slack参加者報告でも採点環境を実測確認
+
+参加者の成功提出ログとして以下が共有されています。
+
+- Python 3.10.12
+- PyTorch 2.11.0+cu130
+- CUDA 13.0
+- NVIDIA L4
+- EGL rendering
+
+これは配布リポジトリ／公式資料から確認した採点環境と一致しており、L4 + Python 3.10 + CUDA13 を提出互換性の基準として扱う判断を補強します。
 
 ---
 
@@ -19,17 +76,17 @@
 
 ### 1.2 Track
 
-| Track | 意味 |
+| Track | 現時点での確定理解 |
 |---|---|
 | Track 1 | 同一タスク・同一ドメイン |
 | Track 2 | 同一タスク・未知ドメイン。位置・視点・ノイズ変更等 |
-| Track 3 | 既知タスクの組み合わせ・未知ドメイン。言語指示で新規構成されたタスク |
+| Track 3 | **LIBERO既存タスクの逆操作**。個別タスク・タスク数は非公開 |
 
 Trackごとに別モデルを提出しても、同一モデルを提出してもよい。
 
 ### 1.3 評価式は success rate 単独ではない
 
-公式 v1.1 では、成功判定と衝突判定をゲートとして、以下の正規化済み指標を重み付きで評価することが明示されています。
+公式 v1.1 では、成功判定と衝突判定をゲートとして、以下の正規化済み指標を重み付きで評価します。
 
 - time / steps
 - jerk
@@ -44,7 +101,7 @@ Trackごとに別モデルを提出しても、同一モデルを提出しても
 
 `smooth_metrics` は time, jerk, SPARC, trajectory, rotation の非公開重み付き正規化値です。正規化式と重みは非公開です。
 
-したがって、公開ローカル scorer の success-rate ベース `overall_score` は開発用指標であり、本番スコアそのものではありません。成功率を最重要ゲートとして維持しつつ、成功軌道の滑らかさ・短さ・安全性も改善対象です。
+公開ローカル scorer の success-rate ベース `overall_score` は開発用指標であり、本番スコアそのものではありません。成功率を最重要ゲートとして維持しつつ、成功軌道の滑らかさ・短さ・安全性も改善対象です。
 
 Track 1/2/3 の Total Score の合計が各本選スコアです。最終評価フォームに未提出の Track は 0 点です。
 
@@ -64,6 +121,10 @@ Track 1/2/3 の Total Score の合計が各本選スコアです。最終評価�
 
 - 単一 NVIDIA L4
 - VRAM 24GB
+- Python 3.10.12
+- CUDA 13.0
+- PyTorch 2.11.0+cu130
+- EGL rendering
 - 1 inference 10秒以内
 - リーダーボードの Track 評価は依存インストールから評価完了まで wall-clock 1時間以内
 
@@ -116,6 +177,8 @@ float32 shape (7,)
 
 LIBERO / LIBERO-plus データの学習利用は公式Q&Aで許可されています。また配布ローカル評価環境を使った強化学習も禁止されていません。
 
+Track 3 の公式開示を受け、既存データをそのまま使うだけでなく、**forward trajectory から inverse-task training data を作れるか**を最優先で検証します。ただし単純な action sequence の時間反転が物理的に正しいとは限らないため、環境状態・gripper・collisionを含めて再生成／rolloutする方式を優先します。
+
 ### 1.9 π0.5 baseline
 
 公式配布 `examples/pi05_libero_finetune` には以下が含まれます。
@@ -134,7 +197,7 @@ step 5000 checkpoint が配布 baseline で、公式参考 leaderboard score は
 | Track 2 | 0.165 |
 | Track 3 | 0.000 |
 
-これはモデル選定時の最低比較ラインとして扱います。
+Track 3 が0であることと逆操作設計の開示を合わせると、**inverse-task fine-tuning は本選1で最も明確な改善仮説の一つ**です。
 
 ### 1.10 Sandbox / offline / submission 制約
 
@@ -168,7 +231,7 @@ step 5000 checkpoint が配布 baseline で、公式参考 leaderboard score は
 - LIBERO / LIBERO-plus データ学習
 - `lerobot` を requirements.txt に記載
 
-この境界は重要です。後処理を入れるなら task-specific rule ではなく、全タスク共通の安全・滑らかさ改善として設計します。
+Track 3 の設計が公開されたことは、task-specific hard coding が許可されたことを意味しません。逆操作は training/evaluation distribution の設計に利用し、推論時は学習済みpolicyから action を生成します。
 
 ---
 
@@ -176,12 +239,10 @@ step 5000 checkpoint が配布 baseline で、公式参考 leaderboard score は
 
 ### 3.1 最適化目標
 
-以前の「success rate 最優先」は方向としては維持しますが、公式 v1.1 により次の二段階最適化に修正します。
-
 1. 成功ゲートを最大化する
 2. 成功を落とさない範囲で collision / jerk / SPARC / steps / trajectory / rotation を改善する
 
-成功しなければゲートでスコアを失うため、滑らかさだけを先に最適化するのは誤りです。一方、同程度の成功率なら、短く滑らかで衝突しないpolicyが本番では有利です。
+成功しなければゲートでスコアを失います。一方、同程度の成功率なら、短く滑らかで衝突しないpolicyが本番では有利です。
 
 ### 3.2 Track別戦略
 
@@ -197,21 +258,23 @@ step 5000 checkpoint が配布 baseline で、公式参考 leaderboard score は
 - camera / lighting / texture / position variation
 - agentview と wrist image の使い分け検証
 
-#### Track 3
+#### Track 3 — 最優先仮説を更新
 
-baseline が 0.000 なので最大の差別化候補です。
+Track 3 は LIBERO 既存タスクの逆操作です。したがって従来の漠然とした composition 対策より、次を優先します。
 
-- compositional language understanding
-- multi-task / skill composition
-- instruction paraphrase
-- history / action chunk の設計
-- standard LIBERO と LIBERO-plus を混ぜた skill coverage
+- forward / inverse task pair dataset
+- original init region を goal にした reverse placement
+- inverse instruction generation
+- grasp-release の逆方向 skill coverage
+- reverse task rollout による demonstration 生成
+- LIBERO standard + LIBERO-plus の双方で inverse task を生成し未知visual domainにも対応
+- Track3 example BDDLを基準にしたローカル inverse evaluation
 
-ただし本選1は3 Track合算なので、Track3だけに賭けず Track1/2 の確実な点も取りに行きます。
+π0.5 baseline Track3=0.000 のため、ここに成功率を作れれば差別化が大きい可能性があります。ただし3 Track合算なので Track1/2 を犠牲にしない multi-task mix とします。
 
 ### 3.3 モデル選定
 
-比較対象を最低限以下に固定します。
+比較対象:
 
 1. π0.5 official baseline
 2. SmolVLA
@@ -219,19 +282,18 @@ baseline が 0.000 なので最大の差別化候補です。
 
 比較条件:
 
-- 同一のTrack evaluation
+- 同一Track evaluation
 - L4 24GBで実測
 - success / official smooth metrics相当
 - p50/p95/p99 inference latency
 - VRAM peak
 - package size
 - task別failure mode
-
-RTX PRO 6000 Blackwellで動くことは採用条件ではありません。L4 24GBで安定動作することが必須条件です。
+- **forward task / inverse task を分離した success rate**
 
 ### 3.4 推論後段補正
 
-公式Q&Aにより、全タスク共通・決定論的な action 後段補正は利用可能です。候補:
+公式Q&Aで許可される全タスク共通・決定論的な候補:
 
 - action magnitude clipping
 - delta translation / rotation のrate limit
@@ -239,50 +301,64 @@ RTX PRO 6000 Blackwellで動くことは採用条件ではありません。L4 2
 - gripper hysteresis
 - 異常値防止
 
-ただし success rate を落とさないことをA/B testで確認します。task名やsceneに依存する条件分岐は入れません。
+success rate を落とさないことをA/B testします。task名やsceneに依存する条件分岐は入れません。
 
 ---
 
-## 4. GPU時間60hを前提にした本選1実験計画
+## 4. GPU時間60hを前提にした本選1実験計画 — Slack更新版
 
-60hを無計画なfull trainingに使わず、stage-gate方式にします。
-
-### Gate A: baseline再現 6h
+### Gate A: baseline再現 5h
 
 - π0.5 official checkpointを配布Dockerで検証
 - Track1/2/3 smoke evaluation
 - latency / VRAM計測
 - submission zip validation
 
-### Gate B: 候補モデル比較 10h
+### Gate B: Track3 inverse pipeline PoC 8h
+
+- Track3 example BDDL解析
+- forward → inverse task generator PoC
+- inverse instruction生成
+- demonstration生成方法を決定
+- 小規模fine-tuneで inverse success が0から立ち上がるか確認
+
+**Go条件:** inverse evaluationでbaselineより明確な改善が出ること。
+
+### Gate C: 候補モデル比較 8h
 
 - π0.5
 - SmolVLA
 - OpenVLA-OFT+
 
-短時間fine-tuneまたは既存checkpointで比較し、明確に弱い候補を落とします。
+forward + inverse の両方で短時間比較し、勝ちモデルを選定します。
 
-### Gate C: 勝ちモデル学習 28h
+### Gate D: 勝ちモデル学習 27h
 
-- LIBERO + LIBERO-plus mix
-- Track2 augmentation
-- Track3 compositionを意識したsampling
-- checkpointを複数保存
+training mix:
 
-### Gate D: scoring改善 8h
+- standard LIBERO forward
+- LIBERO-plus forward
+- inverse LIBERO
+- inverse LIBERO-plus
 
-成功率上位checkpointに対してのみ、共通action post-processingをA/B testします。
+Track1/2性能を維持しつつTrack3を立ち上げる比率を探索します。
 
-### Gate E: 最終検証 8h
+### Gate E: scoring改善 5h
 
-- 運営Dockerでclean end-to-end
-- 3 Track zipを作成
+成功率上位checkpointのみ共通action post-processingをA/B testします。
+
+### Gate F: 最終検証 7h
+
+- 運営Docker clean end-to-end
+- Track1/2/3 zip作成
 - `validate_submission.py`
 - dependency installから評価完了まで確認
 - 10 sec/inference margin確認
 - hash / model metadata記録
+- リーダーボードで最終動作確認
+- 最終評価フォームへのアップロードは十分な余裕を持って行う
 
-合計60h。実験が早く終わればGate Cへ戻します。
+合計60h。
 
 ---
 
@@ -291,6 +367,7 @@ RTX PRO 6000 Blackwellで動くことは採用条件ではありません。L4 2
 - model weightsをzip内に同梱
 - 外部通信不要
 - L4 24GBで起動
+- Python 3.10.12 / CUDA13 / PyTorch2.11環境でPASS
 - `/health` PASS
 - `/reset` PASS
 - `/act` = float32 `(7,)`
@@ -300,26 +377,48 @@ RTX PRO 6000 Blackwellで動くことは採用条件ではありません。L4 2
 - 運営配布Dockerでend-to-end PASS
 - Track1/2/3を最終フォームへすべて提出
 - 最終提出zipとレポート記載hashを一致させる
+- **最終評価フォームを動作確認用途に使わない**
 
 ---
 
 ## 6. 現時点の優先順位
 
-1. **π0.5 official baselineを完全再現** — 公式0.286 / 0.165 / 0.000を基準化
-2. **OpenVLA-OFT+を本選I/Oへadapter化してL4 benchmark**
-3. **SmolVLAを同条件benchmark**
-4. **Track2向けLIBERO-plus学習mix最適化**
-5. **Track3 composition学習を重点検証**
-6. **成功率を維持した共通action smoothing / clipping**
-7. **3 Track別checkpoint採用判断**
-8. **運営Dockerによる最終zip hardening**
+1. **Track3 inverse-task generator / evaluation を作る** — Slack開示で最も大きく変わった点
+2. **π0.5 official baselineを完全再現** — 0.286 / 0.165 / 0.000を基準化
+3. **inverse dataでπ0.5を短時間fine-tuneしTrack3が0から改善するか検証**
+4. **OpenVLA-OFT+を本選I/Oへ接続しL4 benchmark**
+5. **SmolVLAを同条件比較**
+6. 勝ちモデルに forward + inverse + LIBERO-plus を混ぜて本学習
+7. successを落とさない範囲でtrajectory scoring改善
+8. リーダーボードで動作確認後、最終評価フォームへ提出
 
 ---
 
-## 7. 重要な判断
+## 7. 情報源の扱い
 
-本選1の勝ち筋は「最大モデルをRTX PRO 6000で学習すること」ではありません。
+優先順位:
 
-**Blackwellを学習速度のために使い、L4 24GBで確実に動くVLAを作り、Track1/2の成功率を確保しながらTrack3のcomposition汎化で差を作り、最後に成功を壊さない範囲で滑らかさ・効率・安全性を改善する**、という構成が公式v1.1に最も整合します。
+1. 最新の運営Slack公式アナウンス
+2. `PARC2026開発コンペティション_本選_v1.1`
+3. 本戦配布リポジトリ実装
+4. 公式Q&A
+5. Slack参加者の実測報告（補助Evidence）
 
-また、リーダーボードは1日1回/Trackしか使えずエラーでも消費するため、Omnicampusをデバッグ環境にしてはいけません。ローカル評価と運営Dockerを主な開発ループとし、leaderboard submissionは仮説検証の高価な測定点として扱います。
+参加者の推測・雑談は公式仕様とは区別します。特に今回の Track3 逆操作については参加者推測ではなく、2026/8/28の運営公式アナウンスによる確定情報として扱います。
+
+---
+
+## 8. 次に実装するもの
+
+最優先実装を以下に変更します。
+
+1. `Track3 inverse task manifest`
+2. BDDL / init region から逆操作タスクを構成する generator の仕様調査
+3. inverse demonstration 生成方式のPoC
+4. forward / inverse 両対応 Dataset Manifest
+5. π0.5 inverse fine-tune experiment
+6. Track3 local evaluation runner
+7. L4 latency / VRAM benchmark
+8. 最終submission build + validation pipeline
+
+Track3の設計が判明したため、単に大きなVLAへ切り替えるより、**既存LIBEROスキルを逆操作へ転用できる学習データ設計**が本選1で最も高い情報価値を持つ実験です。
