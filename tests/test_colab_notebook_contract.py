@@ -42,12 +42,15 @@ def test_inventory_notebook_is_self_contained_and_metadata_only_fallback():
     assert "videos/*" not in text
 
 
-def test_static_quality_notebook_is_self_contained_and_downloads_parquet_not_video():
+def test_static_quality_notebook_uses_compact_v3_parquet_without_video():
     text = _code_text("30_static_quality_analyzer.ipynb")
     assert "Path('/content/parc2026')" in text
     assert "git','clone','https://github.com/yu37330/py_AI.git'" in text
-    assert "Sylvest/libero_plus_lerobot" in text
-    assert "data/**/*.parquet" in text
+    assert "lerobot/libero_plus" in text
+    assert "HfApi" in text
+    assert "hf_hub_download" in text
+    assert "data/" in text and ".parquet" in text
+    assert "snapshot_download" not in text
     assert "videos/*" not in text
     assert "static_quality_analyzer.py" in text
     assert "quality_review_candidates.csv" in text

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
 
@@ -12,8 +13,10 @@ sys.path.insert(0, str(_ROOT / "tools" / "data"))
 from static_quality_analyzer import (  # noqa: E402
     AnalyzerConfig,
     add_task_relative_flags,
+    analyze_dataset,
     compute_episode_metrics,
     gripper_switches,
+    task_map_from_meta,
 )
 
 
@@ -22,7 +25,7 @@ def test_compute_episode_metrics_for_constant_velocity_xyz():
     n = 10
     t = np.arange(n) / fps
     state = np.zeros((n, 8), dtype=np.float64)
-    state[:, 0] = 0.1 * t  # 0.1 m/s constant x velocity
+    state[:, 0] = 0.1 * t
     state[:, 6] = 0.02
     state[:, 7] = -0.02
     action = np.zeros((n, 7), dtype=np.float64)
@@ -122,3 +125,65 @@ def test_integrity_issue_always_creates_review_candidate():
     flagged = add_task_relative_flags(df, z_threshold=5.0)
     assert bool(flagged.iloc[0]["flag_integrity"])
     assert bool(flagged.iloc[0]["quality_review_candidate"])
+
+
+def test_task_map_supports_v3_tasks_parquet(tmp_path: Path):
+    meta = tmp_path / "meta"
+    meta.mkdir()
+    pd.DataFrame(
+        {"task_index": [0, 1], "task": ["task zero", "task one"]}
+    ).to_parquet(meta / "tasks.parquet", index=False)
+    assert task_map_from_meta(meta) == {0: "task zero", 1: "task one"}
+
+
+def test_analyze_dataset_supports_multi_episode_v3_parquet(tmp_path: Path):
+    root = tmp_path / "dataset"
+    meta = root / "meta"
+    data = root / "data" / "chunk-000"
+    meta.mkdir(parents=True)
+    data.mkdir(parents=True)
+
+    (meta / "info.json").write_text(
+        json.dumps(
+            {
+                "codebase_version": "v3.0",
+                "total_episodes": 2,
+                "total_frames": 10,
+                "total_tasks": 2,
+                "fps": 20,
+                "data_path": "data/chunk-{chunk_index:03d}/file-{file_index:03d}.parquet",
+            }
+        )
+    )
+    pd.DataFrame(
+        {"task_index": [0, 1], "task": ["task zero", "task one"]}
+    ).to_parquet(meta / "tasks.parquet", index=False)
+
+    rows = []
+    for episode_index, task_index in [(0, 0), (1, 1)]:
+        for frame_index in range(5):
+            state = np.zeros(8, dtype=np.float32)
+            state[0] = episode_index + frame_index * 0.01
+            action = np.zeros(7, dtype=np.float32)
+            action[0] = 0.1
+            rows.append(
+                {
+                    "observation.state": state.tolist(),
+                    "action": action.tolist(),
+                    "timestamp": frame_index / 20.0,
+                    "frame_index": frame_index,
+                    "episode_index": episode_index,
+                    "task_index": task_index,
+                }
+            )
+    pd.DataFrame(rows).to_parquet(data / "file-000.parquet", index=False)
+
+    out = tmp_path / "out"
+    summary = analyze_dataset(root, out, AnalyzerConfig(fps=20.0))
+    metrics = pd.read_csv(out / "episode_quality_metrics.csv")
+
+    assert summary["episodes_analyzed"] == 2
+    assert summary["missing_episode_count"] == 0
+    assert summary["data_parquet_file_count"] == 1
+    assert metrics["episode_index"].tolist() == [0, 1]
+    assert metrics["task_name"].tolist() == ["task zero", "task one"]

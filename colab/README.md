@@ -38,8 +38,11 @@ Use a Colab A100 for model comparison, data ablation, Track3 inverse-data resear
    - success/collision/replayabilityはこの段階では推測しない
 4. `30_static_quality_analyzer.ipynb`
    - self-contained preflight
-   - dataset priority: explicit `PARC_DATASET_ROOT` → organizer combined → public `Sylvest/libero_plus_lerobot`
-   - public fallbackは `meta + data/**/*.parquet` のみ取得し、videosはdownloadしない
+   - dataset priority: explicit `PARC_DATASET_ROOT` → organizer combined → public `lerobot/libero_plus` v3
+   - Static Analyzerのpublic fallbackだけは、14,347個の小parquetを持つv2.1ではなく、同じ14,347 episodes / 2,238,036 frames / 40 tasks / 20Hzを少数parquetへrepackしたv3を使う
+   - Hub revisionを取得してpinし、parquetを1ファイルずつ逐次downloadするため、14k requestsによる429を避ける
+   - videosはdownloadしない
+   - analyzerはv2の1-episode-per-fileとv3のmulti-episode parquetの両方に対応
    - 全episodeについて EEF path/displacement、raw/smoothed jerk、action RMS、idle ratio、gripper switches、timestamp/frame integrityを計測
    - task-relative robust-zで `REVIEW` 候補を作るが、自動Rejectはしない
    - task success / collision / replayabilityはReplay Validatorまで保留する

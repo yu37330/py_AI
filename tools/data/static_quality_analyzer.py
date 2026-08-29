@@ -1,27 +1,24 @@
 #!/usr/bin/env python3
 """Static episode-level quality analyzer for LeRobot LIBERO-style datasets.
 
-This V1 intentionally stays simulator-free. It reads episode parquet files and
-computes descriptive trajectory/action metrics plus task-relative review flags.
-It does NOT infer task success, harmful collision, or replayability.
+V1 is simulator-free. It reads local parquet trajectory data and computes
+per-episode descriptive trajectory/action metrics plus task-relative REVIEW
+flags. It supports both:
 
-For the 8D LIBERO state layout we use the LeRobot convention:
-  [eef_xyz(3), eef_axis_angle(3), gripper_qpos(2)]
-Actions are expected to be 7D:
-  [eef_delta_xyz(3), eef_delta_rot(3), gripper(1)]
+- LeRobot v2.x: one parquet file per episode
+- LeRobot v3.x: many episodes packed into larger parquet files
 
-The analyzer records this assumption in its summary and fails closed if the
-required state/action shapes are not present.
+It intentionally does NOT infer task success, harmful collision, or
+replayability.
 """
 
 from __future__ import annotations
 
 import argparse
 import json
-import math
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any
 
 import numpy as np
 import pandas as pd
@@ -69,19 +66,36 @@ def resolve_dataset_root(root: Path) -> Path:
 
 
 def task_map_from_meta(meta: Path) -> dict[int, str]:
-    path = meta / "tasks.jsonl"
-    if not path.exists():
-        return {}
-    out: dict[int, str] = {}
-    for row in read_jsonl(path):
-        idx = row.get("task_index")
-        name = row.get("task") or row.get("task_name") or row.get("name")
-        if idx is not None and name is not None:
-            out[int(idx)] = str(name)
-    return out
+    """Read task names from LeRobot v2 jsonl or v3 parquet metadata."""
+    jsonl = meta / "tasks.jsonl"
+    if jsonl.exists():
+        out: dict[int, str] = {}
+        for row in read_jsonl(jsonl):
+            idx = row.get("task_index")
+            name = row.get("task") or row.get("task_name") or row.get("name")
+            if idx is not None and name is not None:
+                out[int(idx)] = str(name)
+        return out
+
+    parquet = meta / "tasks.parquet"
+    if parquet.exists():
+        frame = pd.read_parquet(parquet)
+        idx_col = next((c for c in ("task_index", "index", "task_id") if c in frame), None)
+        name_col = next((c for c in ("task", "task_name", "name") if c in frame), None)
+        if idx_col is None or name_col is None:
+            raise KeyError(
+                f"{parquet}: expected task index/name columns, got {list(frame.columns)}"
+            )
+        return {
+            int(idx): str(name)
+            for idx, name in zip(frame[idx_col], frame[name_col], strict=False)
+        }
+
+    return {}
 
 
 def episode_meta_map(meta: Path) -> dict[int, dict[str, Any]]:
+    """Read v2 episode metadata when present; v3 does not require it here."""
     path = meta / "episodes.jsonl"
     if not path.exists():
         return {}
@@ -125,7 +139,7 @@ def path_length(points: np.ndarray) -> float:
 def jerk_norms(points: np.ndarray, dt: float) -> np.ndarray:
     if len(points) < 4 or dt <= 0:
         return np.empty(0, dtype=np.float64)
-    jerk = np.diff(points, n=3, axis=0) / (dt ** 3)
+    jerk = np.diff(points, n=3, axis=0) / (dt**3)
     return np.linalg.norm(jerk, axis=1)
 
 
@@ -144,7 +158,7 @@ def gripper_switches(gripper_action: np.ndarray, zero_threshold: float) -> int:
 def safe_numeric_matrix(series: pd.Series, expected_dim: int, name: str) -> np.ndarray:
     try:
         arr = np.asarray(series.tolist(), dtype=np.float64)
-    except Exception as exc:  # pragma: no cover - defensive for malformed parquet
+    except Exception as exc:  # pragma: no cover
         raise ValueError(f"{name}: cannot convert to numeric matrix") from exc
     if arr.ndim != 2 or arr.shape[1] != expected_dim:
         raise ValueError(f"{name}: expected shape [T,{expected_dim}], got {arr.shape}")
@@ -158,10 +172,6 @@ def compute_episode_metrics(
     frame_index: np.ndarray | None,
     cfg: AnalyzerConfig,
 ) -> dict[str, Any]:
-    """Compute descriptive metrics for one episode.
-
-    Exposed as a pure function so it can be regression-tested without parquet IO.
-    """
     if state.ndim != 2 or state.shape[1] != LIBERO_STATE_DIM:
         raise ValueError(f"state must be [T,{LIBERO_STATE_DIM}], got {state.shape}")
     if action.ndim != 2 or action.shape[1] != LIBERO_ACTION_DIM:
@@ -171,18 +181,10 @@ def compute_episode_metrics(
 
     n = len(state)
     dt = 1.0 / cfg.fps
-    eef = state[:, :3]
-    axis_angle = state[:, 3:6]
-    gripper_state = state[:, 6:8]
-    motion_action = action[:, :6]
-    xyz_action = action[:, :3]
-    gripper_action = action[:, 6]
-
     finite_state = np.isfinite(state)
     finite_action = np.isfinite(action)
     invalid_value_count = int((~finite_state).sum() + (~finite_action).sum())
 
-    # Replace non-finite values only for metric calculation; the episode remains flagged.
     state_calc = np.nan_to_num(state, nan=0.0, posinf=0.0, neginf=0.0)
     action_calc = np.nan_to_num(action, nan=0.0, posinf=0.0, neginf=0.0)
     eef = state_calc[:, :3]
@@ -200,9 +202,7 @@ def compute_episode_metrics(
     jerk_smooth = jerk_norms(smooth_eef, dt)
 
     motion_norm = np.linalg.norm(motion_action, axis=1) if n else np.empty(0)
-    idle_ratio = (
-        float(np.mean(motion_norm <= cfg.idle_motion_threshold)) if n else float("nan")
-    )
+    idle_ratio = float(np.mean(motion_norm <= cfg.idle_motion_threshold)) if n else float("nan")
 
     timestamp_nonmonotonic = 0
     timestamp_dt_mae = float("nan")
@@ -281,51 +281,90 @@ def add_task_relative_flags(df: pd.DataFrame, z_threshold: float) -> pd.DataFram
     return out
 
 
-def iter_episode_parquet_paths(root: Path, info: dict[str, Any], episode_ids: Iterable[int]) -> Iterable[tuple[int, Path]]:
-    pattern = info.get("data_path")
-    chunk_size = int(info.get("chunks_size", 1000))
-    if isinstance(pattern, str) and "{episode_index" in pattern:
-        for idx in episode_ids:
-            chunk = idx // chunk_size
-            rel = pattern.format(episode_chunk=chunk, episode_index=idx)
-            yield idx, root / rel
-        return
-
-    # Fallback for datasets with a different LeRobot layout.
-    discovered: dict[int, Path] = {}
-    for p in root.glob("data/**/*.parquet"):
-        digits = "".join(ch for ch in p.stem if ch.isdigit())
-        if digits:
-            discovered[int(digits)] = p
-    for idx in episode_ids:
-        if idx in discovered:
-            yield idx, discovered[idx]
+def _episode_index_from_filename(path: Path) -> int | None:
+    digits = "".join(ch for ch in path.stem if ch.isdigit())
+    return int(digits) if digits else None
 
 
-def analyze_dataset(root: Path, out_dir: Path, cfg: AnalyzerConfig, max_episodes: int | None = None) -> dict[str, Any]:
+def iter_episode_frames(
+    root: Path,
+    target_episode_ids: set[int] | None = None,
+):
+    """Yield (episode_index, parquet_path, episode_frame) for v2 and v3 layouts.
+
+    LeRobot v3 stores many episodes in each parquet and includes episode_index in
+    the rows. LeRobot v2 commonly stores one episode per parquet. Reading each
+    parquet once avoids the 14k-small-file access pattern used by the old V1.
+    """
+    parquet_paths = sorted(root.glob("data/**/*.parquet"))
+    if not parquet_paths:
+        raise FileNotFoundError("no data/**/*.parquet files found")
+
+    columns = [
+        "observation.state",
+        "action",
+        "timestamp",
+        "frame_index",
+        "episode_index",
+        "task_index",
+    ]
+
+    for parquet_path in parquet_paths:
+        try:
+            frame = pd.read_parquet(parquet_path, columns=columns)
+        except Exception:
+            # Some older files may not expose every optional column; retry full.
+            frame = pd.read_parquet(parquet_path)
+
+        required = {"observation.state", "action"}
+        missing = required.difference(frame.columns)
+        if missing:
+            raise KeyError(f"{parquet_path}: missing columns {sorted(missing)}")
+
+        if "episode_index" in frame.columns:
+            for episode_index, ep_frame in frame.groupby("episode_index", sort=True):
+                idx = int(episode_index)
+                if target_episode_ids is not None and idx not in target_episode_ids:
+                    continue
+                yield idx, parquet_path, ep_frame.reset_index(drop=True)
+        else:
+            idx = _episode_index_from_filename(parquet_path)
+            if idx is None:
+                raise ValueError(
+                    f"{parquet_path}: no episode_index column and cannot infer episode id from filename"
+                )
+            if target_episode_ids is None or idx in target_episode_ids:
+                yield idx, parquet_path, frame.reset_index(drop=True)
+
+
+def analyze_dataset(
+    root: Path,
+    out_dir: Path,
+    cfg: AnalyzerConfig,
+    max_episodes: int | None = None,
+) -> dict[str, Any]:
     root = resolve_dataset_root(root)
     meta = root / "meta"
     info = read_json(meta / "info.json")
     tasks = task_map_from_meta(meta)
     episodes_meta = episode_meta_map(meta)
 
-    episode_ids = sorted(episodes_meta) if episodes_meta else list(range(int(info.get("total_episodes", 0))))
+    total_episodes = int(info.get("total_episodes", 0))
+    if episodes_meta:
+        requested_ids = sorted(episodes_meta)
+    elif total_episodes > 0:
+        requested_ids = list(range(total_episodes))
+    else:
+        requested_ids = []
     if max_episodes is not None:
-        episode_ids = episode_ids[:max_episodes]
+        requested_ids = requested_ids[:max_episodes]
+    target_ids = set(requested_ids) if requested_ids else None
 
     rows: list[dict[str, Any]] = []
-    missing_paths: list[str] = []
+    seen_ids: set[int] = set()
+    data_files = sorted(root.glob("data/**/*.parquet"))
 
-    for pos, (episode_index, parquet_path) in enumerate(iter_episode_parquet_paths(root, info, episode_ids), start=1):
-        if not parquet_path.exists():
-            missing_paths.append(str(parquet_path))
-            continue
-        frame = pd.read_parquet(parquet_path)
-        required = {"observation.state", "action"}
-        missing = required.difference(frame.columns)
-        if missing:
-            raise KeyError(f"{parquet_path}: missing columns {sorted(missing)}")
-
+    for episode_index, parquet_path, frame in iter_episode_frames(root, target_ids):
         state = safe_numeric_matrix(frame["observation.state"], LIBERO_STATE_DIM, "observation.state")
         action = safe_numeric_matrix(frame["action"], LIBERO_ACTION_DIM, "action")
         timestamp = frame["timestamp"].to_numpy() if "timestamp" in frame else None
@@ -337,24 +376,25 @@ def analyze_dataset(root: Path, out_dir: Path, cfg: AnalyzerConfig, max_episodes
             task_index = int(frame["task_index"].iloc[0])
         else:
             task_index = int(ep_meta.get("task_index", -1))
-        row = {
-            "episode_index": episode_index,
-            "task_index": task_index,
-            "task_name": tasks.get(task_index, f"task_index:{task_index}"),
-            "parquet_path": str(parquet_path.relative_to(root)),
-            **metrics,
-        }
-        rows.append(row)
-        if pos % 500 == 0:
-            print(f"processed {pos}/{len(episode_ids)} episodes")
+
+        rows.append(
+            {
+                "episode_index": episode_index,
+                "task_index": task_index,
+                "task_name": tasks.get(task_index, f"task_index:{task_index}"),
+                "parquet_path": str(parquet_path.relative_to(root)),
+                **metrics,
+            }
+        )
+        seen_ids.add(episode_index)
+        if len(rows) % 500 == 0:
+            expected = len(requested_ids) if requested_ids else "?"
+            print(f"processed {len(rows)}/{expected} episodes")
 
     if not rows:
-        sample = "\n".join(missing_paths[:5])
-        raise FileNotFoundError(
-            "no episode parquet files were analyzed. Download data/**/*.parquet first."
-            + (f"\nmissing examples:\n{sample}" if sample else "")
-        )
+        raise FileNotFoundError("no episodes were analyzed from data/**/*.parquet")
 
+    missing_ids = sorted(set(requested_ids) - seen_ids) if requested_ids else []
     df = pd.DataFrame(rows).sort_values("episode_index").reset_index(drop=True)
     df = add_task_relative_flags(df, cfg.robust_z_threshold)
     review = df[df["quality_review_candidate"]].copy()
@@ -371,7 +411,9 @@ def analyze_dataset(root: Path, out_dir: Path, cfg: AnalyzerConfig, max_episodes
         )
         .reset_index()
     )
-    task_summary["review_candidate_rate"] = task_summary["review_candidates"] / task_summary["episodes"]
+    task_summary["review_candidate_rate"] = (
+        task_summary["review_candidates"] / task_summary["episodes"]
+    )
 
     out_dir.mkdir(parents=True, exist_ok=True)
     metrics_path = out_dir / "episode_quality_metrics.csv"
@@ -384,10 +426,15 @@ def analyze_dataset(root: Path, out_dir: Path, cfg: AnalyzerConfig, max_episodes
 
     summary = {
         "dataset_root": str(root),
+        "lerobot_codebase_version": info.get("codebase_version"),
         "fps": cfg.fps,
-        "episodes_requested": len(episode_ids),
+        "data_parquet_file_count": len(data_files),
+        "episodes_requested": len(requested_ids) if requested_ids else None,
         "episodes_analyzed": int(len(df)),
-        "missing_episode_parquet_count": int(len(missing_paths)),
+        "missing_episode_count": int(len(missing_ids)),
+        "missing_episode_examples": missing_ids[:20],
+        # Kept for compatibility with V1 output consumers.
+        "missing_episode_parquet_count": int(len(missing_ids)),
         "review_candidate_count": int(df["quality_review_candidate"].sum()),
         "review_candidate_rate": float(df["quality_review_candidate"].mean()),
         "config": asdict(cfg),
@@ -407,7 +454,10 @@ def analyze_dataset(root: Path, out_dir: Path, cfg: AnalyzerConfig, max_episodes
             "idle threshold is action-space descriptive and must not be treated as a universal quality threshold",
         ],
     }
-    summary_path.write_text(json.dumps(summary, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    summary_path.write_text(
+        json.dumps(summary, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
     print(json.dumps(summary, ensure_ascii=False, indent=2))
     return summary
 
