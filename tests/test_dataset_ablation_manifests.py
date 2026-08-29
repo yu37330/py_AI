@@ -112,3 +112,30 @@ def test_run_matrix_skips_integrity_duplicate_when_no_hard_failures(tmp_path: Pa
     assert "V1_INTEGRITY_ONLY" not in matrix["cheap_ablation_order"]
     assert matrix["skip_reason"]["V1_INTEGRITY_ONLY"]
     assert matrix["promotion_rule"].startswith("screening only")
+
+
+def test_run_matrix_includes_integrity_variant_when_it_differs_from_raw(tmp_path: Path):
+    df = _synthetic_metrics()
+    # Mark one non-review episode as a hard integrity failure so it cannot be
+    # selected into the OK-only eval holdout and remains a real training diff.
+    idx = df.index[(~df["quality_review_candidate"])][0]
+    df.loc[idx, "flag_integrity"] = True
+    df.loc[idx, "quality_review_candidate"] = True
+    df.loc[idx, "quality_flag_count"] = 1
+    metrics = tmp_path / "episode_quality_metrics.csv"
+    df.to_csv(metrics, index=False)
+    out = tmp_path / "out"
+    matrix = build_manifests(
+        metrics,
+        out,
+        dataset_id="test/libero",
+        dataset_revision="r1",
+        seed=3,
+        eval_per_task=1,
+    )
+    assert "V1_INTEGRITY_ONLY" in matrix["cheap_ablation_order"]
+    assert "V1_INTEGRITY_ONLY" not in matrix["skip_reason"]
+    assert (
+        matrix["variants"]["V1_INTEGRITY_ONLY"]["episode_count"]
+        == matrix["variants"]["V0_RAW"]["episode_count"] - 1
+    )
