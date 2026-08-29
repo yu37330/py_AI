@@ -13,11 +13,22 @@ Use a Colab A100 for model comparison, data ablation, Track3 inverse-data resear
 - `/content/cache/*`: Hugging Face/model caches and temporary datasets.
 - Google Drive: optional persistence for checkpoints and large generated artifacts only.
 
-## First notebook
+## Notebook order
 
-Open `00_a100_preflight.ipynb` in Colab. It checks the GPU, prepares `/content/parc2026`, clones `py_AI`, and creates the expected workspace.
+1. `00_a100_preflight.ipynb`
+   - GPU / Python / workspace確認
+   - `/content/parc2026/py_AI` clone
+2. `10_pi05_smoke_ga.ipynb`
+   - Python 3.10学習環境をColab側へ構築
+   - π0.5 LoRAの短いsmoke
+   - runtime traceで `GA=8` が8 micro-stepごとに1 optimizer updateになることを検証
+   - 20-step + mergeは明示的に有効化した場合だけ実行
+3. `20_dataset_inventory.ipynb`
+   - LeRobot metadataからtask / episode構成をCSV化
+   - raw / uniform / sqrt-balancedのsampling候補を生成
+   - success/collision/replayabilityはこの段階では推測しない
 
-After preflight, run model-specific experiments using the configs under `experiments/configs/`.
+`10` と `20` は並列レーンです。モデル側のGateとDataset Factory側のinventoryを独立に進め、両方が揃った時点でcheap ablationへ進みます。
 
 ## Comparison contract
 
@@ -35,8 +46,9 @@ Do not select a model using training loss alone. Prefer simulator success plus t
 ## Planned sequence
 
 1. Reproduce pi0.5 LoRA smoke and verify GA semantics.
-2. Add SmolVLA on the same dataset/eval split.
-3. Add OpenVLA-OFT on the same dataset/eval split.
-4. Compare model choice and dataset ablations separately.
-5. Research Track3 inverse/reversed demonstrations.
-6. Promote only the strongest configuration to organizer-GPU training.
+2. Inventory organizer data and establish V0 Raw / task-sampling candidates.
+3. Run cheap V0/V1/V2 dataset ablations with pi0.5 fixed.
+4. Add SmolVLA and OpenVLA-OFT on the same dataset/eval split.
+5. Compare model choice and later V3/V4/V5 dataset ablations separately.
+6. Research simulator-valid Track3 inverse/reversed demonstrations.
+7. Promote only the strongest configuration to organizer-GPU training.
