@@ -3,10 +3,14 @@
 # ピーク VRAM とスループットを測る。手持ちの GPU に載る PI05_BS を
 # 決めてから full_pi05_lora.sh を回すこと。
 #
+# full_pi05_lora.sh と同じ LoRA 条件で測る。ここで PEFT を付け忘れると
+# 4B 全体を学習する full-FT になり、VRAM probe が本学習条件を反映しない。
+#
 # 使い方:
 #   BS=16 STEPS=30 bash scripts/probe_pi05_bs.sh
 #   BS=32 STEPS=30 bash scripts/probe_pi05_bs.sh
 #
+# LORA_R=16 で LoRA rank を変更できる。
 # GC=1 を付けると gradient checkpointing を有効にする（VRAM は減るが遅くなる）。
 
 set -euo pipefail
@@ -16,7 +20,8 @@ source "$HERE/_train_common.sh"
 
 BS=${BS:-16}
 STEPS=${STEPS:-30}
-TAG=${TAG:-bs${BS}}
+LORA_R=${LORA_R:-16}
+TAG=${TAG:-bs${BS}_r${LORA_R}}
 RUN_NAME=probe_pi05_${TAG}
 
 PI05_DATASET_REPO_ID="${PI05_DATASET_REPO_ID:-local/libero_combined_20hz}"
@@ -39,7 +44,7 @@ export WANDB_DISABLED=true
 
 _start_vram_sampler
 
-echo "=== probe pi05 BS=$BS STEPS=$STEPS ==="
+echo "=== probe pi05 LoRA BS=$BS R=$LORA_R STEPS=$STEPS ==="
 START=$(date +%s)
 
 # ハイパーパラメータは full_pi05_lora.sh に合わせ、ステップ数だけ短くする。
@@ -56,6 +61,8 @@ lerobot-train \
     --policy.num_inference_steps=10 \
     --policy.device=cuda \
     --policy.push_to_hub=false \
+    --peft.method_type=LORA \
+    --peft.r=$LORA_R \
     ${GC:+--policy.gradient_checkpointing=true} \
     --dataset.repo_id="$PI05_DATASET_REPO_ID" \
     --dataset.root="$PI05_DATASET_ROOT" \
@@ -72,5 +79,5 @@ lerobot-train \
     2>&1 | tee "$LOG_FILE" || true
 
 _summarize_run "$START" "$(date +%s)"
-RATE=$(grep -aoE "[0-9.]+(it/s|s/it)" "$LOG_FILE" | tail -1 || true)
+RATE=$(grep -aoE "[0-9.]+(step/s|s/step|it/s|s/it)" "$LOG_FILE" | tail -1 || true)
 echo "=== rate=$RATE ==="
