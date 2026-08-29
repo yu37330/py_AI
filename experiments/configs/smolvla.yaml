@@ -1,0 +1,20 @@
+id: smolvla_baseline
+family: smolvla
+framework: lerobot
+source_repo: https://github.com/huggingface/lerobot.git
+source_ref: v0.4.4
+base_checkpoint: lerobot/smolvla_base
+training:
+  method: finetune
+  dtype: bfloat16
+  batch_size: 64
+  gradient_accumulation: 1
+  learning_rate: TODO_TUNE
+  seed: 1000
+  steps: TODO_EQUAL_DATA_AND_WALLTIME_PROTOCOLS
+comparison:
+  dataset_manifest: experiments/manifests/datasets/libero_common_v1.json
+  eval_split: experiments/manifests/eval_splits/libero_eval_v1.json
+notes:
+  - Use the same state/action/image schema as the common benchmark.
+  - Keep equal-data and equal-wall-time results separate.

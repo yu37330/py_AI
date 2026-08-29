@@ -1,0 +1,37 @@
+{
+  "schema_version": 1,
+  "eval_id": "libero_eval_v1",
+  "description": "Fixed local comparison split shared by pi0.5, SmolVLA and OpenVLA-OFT.",
+  "seed_policy": {
+    "base_seed": 1000,
+    "episode_seeds": [1000, 1001, 1002]
+  },
+  "episodes_per_task": 3,
+  "groups": {
+    "track1_like": {
+      "tasks": ["TODO_PIN_TASKS"],
+      "purpose": "same-task/same-domain capability"
+    },
+    "track2_like": {
+      "tasks": ["TODO_PIN_TASKS"],
+      "purpose": "domain/generalization capability"
+    },
+    "track3_like": {
+      "tasks": ["TODO_PIN_INVERSE_TASKS"],
+      "purpose": "inverse/reversed-task capability"
+    }
+  },
+  "metrics": [
+    "success_rate",
+    "steps_to_success",
+    "episode_time_s",
+    "cartesian_path_length",
+    "orientation_path_length",
+    "joint_path_length",
+    "cartesian_jerk",
+    "joint_jerk",
+    "policy_latency_ms",
+    "peak_vram_mib"
+  ],
+  "rule": "Once real task names are pinned, change this file only by creating a new eval_id/version."
+}

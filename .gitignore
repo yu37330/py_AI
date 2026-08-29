@@ -8,3 +8,18 @@ LIBERO/
 assets.zip
 env_train.sh
 requirements-train.lock.txt
+
+# Colab / experiment scratch
+.ipynb_checkpoints/
+colab/.cache/
+experiments/results/runs/
+experiments/results/artifacts/
+experiments/results/*.csv
+experiments/results/*.jsonl
+wandb/
+checkpoints/
+model_weights/
+*.safetensors
+*.ckpt
+*.pt
+*.pth

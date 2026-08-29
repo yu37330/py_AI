@@ -1,0 +1,20 @@
+id: openvla_oft_baseline
+family: openvla_oft
+framework: openvla_oft
+source_repo: https://github.com/RLinf/openvla-oft.git
+source_ref: TODO_PIN_COMMIT_BEFORE_RUN
+base_checkpoint: TODO_PIN_CHECKPOINT
+training:
+  method: lora_or_oft
+  dtype: bfloat16
+  batch_size: TODO_PROBE_ON_A100
+  gradient_accumulation: TODO_SET_FOR_COMPARABLE_EFFECTIVE_BATCH
+  learning_rate: TODO_FROM_LIBERO_RECIPE
+  seed: 1000
+  steps: TODO_EQUAL_DATA_AND_WALLTIME_PROTOCOLS
+comparison:
+  dataset_manifest: experiments/manifests/datasets/libero_common_v1.json
+  eval_split: experiments/manifests/eval_splits/libero_eval_v1.json
+notes:
+  - Pin the exact upstream commit before recording benchmark results.
+  - Verify output action convention and normalization against the PARC pipeline before promotion.

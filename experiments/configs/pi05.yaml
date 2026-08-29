@@ -1,0 +1,24 @@
+id: pi05_lora_r16
+family: pi05
+framework: lerobot
+source_repo: https://github.com/huggingface/lerobot.git
+source_ref: v0.4.4
+base_checkpoint: lerobot/pi05_libero_base
+training:
+  method: lora
+  lora_r: 16
+  dtype: bfloat16
+  batch_size: 16
+  gradient_accumulation: 8
+  effective_batch_size: 128
+  learning_rate: 5.0e-5
+  seed: 1000
+  steps: 20000
+  num_inference_steps: 10
+  n_action_steps: 10
+comparison:
+  dataset_manifest: experiments/manifests/datasets/libero_common_v1.json
+  eval_split: experiments/manifests/eval_splits/libero_eval_v1.json
+notes:
+  - Organizer GPU smoke/merge path verified on 2026-08-29.
+  - GA=8 semantics must be independently verified before the 20k organizer run.

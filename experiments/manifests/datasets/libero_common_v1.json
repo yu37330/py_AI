@@ -1,0 +1,29 @@
+{
+  "schema_version": 1,
+  "dataset_id": "libero_common_v1",
+  "description": "Common PARC2026 comparison dataset manifest. Fill immutable hashes and task inventory before benchmark promotion.",
+  "source": {
+    "kind": "parc_organizer_tar",
+    "name": "libero_combined_20hz.tar",
+    "sha256": "TODO_COMPUTE",
+    "extracted_layout": ["data/", "meta/", "videos/"]
+  },
+  "observed": {
+    "frames": 3028708,
+    "episodes": 19533,
+    "frequency_hz": 20
+  },
+  "schema_contract": {
+    "state": "TODO_RECORD_FROM_META_INFO",
+    "action": "TODO_RECORD_FROM_META_INFO",
+    "camera_keys": ["TODO_RECORD_CAMERA_KEYS"],
+    "language_key": "TODO_RECORD_LANGUAGE_KEY"
+  },
+  "track_roles": {
+    "track1": "same-task/same-domain base capability",
+    "track2": "domain/generalization capability",
+    "track3": "inverse/reversed-task capability; do not assume naive trajectory reversal is valid"
+  },
+  "task_inventory": "TODO_GENERATE",
+  "created_for": "Colab A100 cross-model benchmark"
+}
