@@ -39,13 +39,11 @@ if not isinstance(ids, list) or not ids:
 print(m.get("variant", "unknown"))
 print(json.dumps([int(x) for x in ids], separators=(",", ":")))
 print(m.get("episode_ids_sha256", ""))
-print(m.get("dataset_revision") or "")
 PY
 )
 VARIANT="${META[0]}"
 EPISODES_JSON="${META[1]}"
 EPISODES_SHA="${META[2]}"
-DATASET_REVISION="${META[3]}"
 RUN_NAME="${RUN_NAME:-cheap_${VARIANT,,}}"
 
 _resolve_paths
@@ -57,15 +55,16 @@ export WANDB_DISABLED=true
 export LEROBOT_GRAD_ACCUM="$ABLATION_GA"
 _start_vram_sampler
 
+# The source revision is recorded in the manifest for provenance, but the
+# trainer consumes an already-materialized local root. Passing a Hub commit SHA
+# as DatasetConfig.revision is unnecessary and can trigger remote resolution in
+# some LeRobot paths, so it is intentionally omitted here.
 DATASET_ARGS=(
     "--dataset.repo_id=$PI05_DATASET_REPO_ID"
     "--dataset.root=$PI05_DATASET_ROOT"
     "--dataset.video_backend=$PI05_VIDEO_BACKEND"
     "--dataset.episodes=$EPISODES_JSON"
 )
-if [[ -n "$DATASET_REVISION" ]]; then
-    DATASET_ARGS+=("--dataset.revision=$DATASET_REVISION")
-fi
 
 echo "=== cheap ablation :: variant=$VARIANT bs=$ABLATION_BS ga=$ABLATION_GA eff=$((ABLATION_BS * ABLATION_GA)) steps=$ABLATION_STEPS ==="
 echo "=== manifest=$ABLATION_MANIFEST episodes_sha256=$EPISODES_SHA ==="
@@ -120,6 +119,8 @@ m = json.loads(Path(manifest).read_text())
 result = {
     "variant": variant,
     "manifest": str(Path(manifest).resolve()),
+    "dataset_id": m.get("dataset_id"),
+    "dataset_revision_provenance": m.get("dataset_revision"),
     "episode_ids_sha256": m.get("episode_ids_sha256"),
     "episode_count": m.get("summary", {}).get("episode_count"),
     "frame_count": m.get("summary", {}).get("frame_count"),
