@@ -228,6 +228,20 @@ def build_manifests(
         )
         variants_summary[name] = summary
 
+    cheap_order = ["V0_RAW"]
+    skip_reason: dict[str, str] = {}
+    if variant_ids["V1_INTEGRITY_ONLY"] == variant_ids["V0_RAW"]:
+        skip_reason["V1_INTEGRITY_ONLY"] = "identical to V0 because integrity_failure_count == 0"
+    else:
+        cheap_order.append("V1_INTEGRITY_ONLY")
+    cheap_order.extend(
+        [
+            "V1_MULTI_FLAG_PRUNED_EXPERIMENTAL",
+            "V1_ALL_REVIEW_PRUNED_EXPERIMENTAL",
+            "V2_SQRT_BALANCED_RAW",
+        ]
+    )
+
     run_matrix = {
         "schema_version": 1,
         "dataset_id": dataset_id,
@@ -236,15 +250,8 @@ def build_manifests(
         "source_summary": source_summary,
         "fixed_eval": eval_summary,
         "variants": variants_summary,
-        "cheap_ablation_order": [
-            "V0_RAW",
-            "V1_MULTI_FLAG_PRUNED_EXPERIMENTAL",
-            "V1_ALL_REVIEW_PRUNED_EXPERIMENTAL",
-            "V2_SQRT_BALANCED_RAW",
-        ],
-        "skip_reason": {
-            "V1_INTEGRITY_ONLY": "identical to V0 when integrity_failure_count == 0"
-        },
+        "cheap_ablation_order": cheap_order,
+        "skip_reason": skip_reason,
         "promotion_rule": "screening only; do not select final data from training loss alone",
     }
     (out_dir / "run_matrix.json").write_text(
