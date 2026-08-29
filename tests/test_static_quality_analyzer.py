@@ -127,12 +127,23 @@ def test_integrity_issue_always_creates_review_candidate():
     assert bool(flagged.iloc[0]["quality_review_candidate"])
 
 
-def test_task_map_supports_v3_tasks_parquet(tmp_path: Path):
+def test_task_map_supports_v3_tasks_parquet_columns(tmp_path: Path):
     meta = tmp_path / "meta"
     meta.mkdir()
     pd.DataFrame(
         {"task_index": [0, 1], "task": ["task zero", "task one"]}
     ).to_parquet(meta / "tasks.parquet", index=False)
+    assert task_map_from_meta(meta) == {0: "task zero", 1: "task one"}
+
+
+def test_task_map_supports_official_v3_task_as_index(tmp_path: Path):
+    meta = tmp_path / "meta"
+    meta.mkdir()
+    frame = pd.DataFrame(
+        {"task_index": [0, 1]},
+        index=pd.Index(["task zero", "task one"], name="task"),
+    )
+    frame.to_parquet(meta / "tasks.parquet")
     assert task_map_from_meta(meta) == {0: "task zero", 1: "task one"}
 
 
@@ -156,8 +167,9 @@ def test_analyze_dataset_supports_multi_episode_v3_parquet(tmp_path: Path):
         )
     )
     pd.DataFrame(
-        {"task_index": [0, 1], "task": ["task zero", "task one"]}
-    ).to_parquet(meta / "tasks.parquet", index=False)
+        {"task_index": [0, 1]},
+        index=pd.Index(["task zero", "task one"], name="task"),
+    ).to_parquet(meta / "tasks.parquet")
 
     rows = []
     for episode_index, task_index in [(0, 0), (1, 1)]:
@@ -185,5 +197,6 @@ def test_analyze_dataset_supports_multi_episode_v3_parquet(tmp_path: Path):
     assert summary["episodes_analyzed"] == 2
     assert summary["missing_episode_count"] == 0
     assert summary["data_parquet_file_count"] == 1
+    assert summary["task_metadata_count"] == 2
     assert metrics["episode_index"].tolist() == [0, 1]
     assert metrics["task_name"].tolist() == ["task zero", "task one"]
