@@ -1,0 +1,48 @@
+{
+  "schema_version": 1,
+  "plan_id": "pi05_dataset_ablation_v1",
+  "model": {
+    "policy": "pi05",
+    "pretrained_path": "lerobot/pi05_libero_base",
+    "peft": "LORA",
+    "lora_r": 16,
+    "optimizer_lr": 5e-5,
+    "n_obs_steps": 1,
+    "n_action_steps": 10,
+    "num_inference_steps": 10,
+    "dtype": "bfloat16"
+  },
+  "training": {
+    "batch_size": 4,
+    "gradient_accumulation": 8,
+    "effective_batch": 32,
+    "optimizer_steps": 150,
+    "seed": 1000,
+    "screening_only": true
+  },
+  "manifest_generation": {
+    "seed": 20260830,
+    "eval_per_task": 2,
+    "eval_eligibility": "Static Quality OK only",
+    "sqrt_balance_basis": "task frame exposure",
+    "sqrt_balance_formula": "sqrt(min_task_frames * raw_task_frames)"
+  },
+  "run_order": [
+    "V0_RAW",
+    "V1_MULTI_FLAG_PRUNED_EXPERIMENTAL",
+    "V1_ALL_REVIEW_PRUNED_EXPERIMENTAL",
+    "V2_SQRT_BALANCED_RAW"
+  ],
+  "conditional_skip": {
+    "V1_INTEGRITY_ONLY": "skip when identical to V0_RAW"
+  },
+  "promotion_gate": {
+    "forbid_training_loss_only_selection": true,
+    "require_fixed_eval_or_simulator_evidence": true,
+    "always_keep_baseline": "V0_RAW"
+  },
+  "colab": {
+    "manifest_notebook": "colab/40_dataset_ablation_manifests.ipynb",
+    "training_notebook": "colab/50_pi05_dataset_ablation.ipynb"
+  }
+}

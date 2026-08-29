@@ -16,7 +16,7 @@ Use a Colab A100 for model comparison, data ablation, Track3 inverse-data resear
 
 ## Notebook order
 
-`00_a100_preflight.ipynb` remains the recommended first notebook, but `10`, `20`, and `30` are **self-contained**. Each repeats the essential preflight steps at the beginning: runtime/GPU check, `/content/parc2026` workspace creation, and `py_AI` clone/update. Therefore a fresh Colab runtime can open them directly without failing because `00` was not executed in the same runtime.
+`00_a100_preflight.ipynb` remains the recommended first notebook, but `10`, `20`, `30`, `40`, and `50` are **self-contained**. Each repeats the essential preflight steps at the beginning: runtime/GPU check, `/content/parc2026` workspace creation, and `py_AI` clone/update. Therefore a fresh Colab runtime can open them directly without failing because `00` was not executed in the same runtime.
 
 1. `00_a100_preflight.ipynb`
    - GPU / Python / workspace確認
@@ -24,8 +24,7 @@ Use a Colab A100 for model comparison, data ablation, Track3 inverse-data resear
 2. `10_pi05_smoke_ga.ipynb`
    - self-contained preflight
    - Python 3.10学習環境をColab側へ構築
-   - dataset priority: explicit `PI05_DATASET_ROOT` → organizer combined → public `Sylvest/libero_plus_lerobot`
-   - public fallbackは `meta/ + data/ + videos/` をColab一時領域へ取得するため大容量downloadになる
+   - dataset priority: explicit `PI05_DATASET_ROOT` → organizer combined → public fallback
    - π0.5 LoRAの短いsmoke
    - runtime traceで `GA=8` が8 micro-stepごとに1 optimizer updateになることを検証
    - 20-step + mergeは明示的に有効化した場合だけ実行
@@ -46,14 +45,31 @@ Use a Colab A100 for model comparison, data ablation, Track3 inverse-data resear
    - 全episodeについて EEF path/displacement、raw/smoothed jerk、action RMS、idle ratio、gripper switches、timestamp/frame integrityを計測
    - task-relative robust-zで `REVIEW` 候補を作るが、自動Rejectはしない
    - task success / collision / replayabilityはReplay Validatorまで保留する
+5. `40_dataset_ablation_manifests.ipynb`
+   - self-contained preflight
+   - Static Analyzer出力がなければcompact public v3から自動生成
+   - 2 episodes/taskのOK-only固定holdoutを作り、すべてのtraining variantから除外
+   - `V0_RAW`, `V1_INTEGRITY_ONLY`, `V1_MULTI_FLAG_PRUNED_EXPERIMENTAL`, `V1_ALL_REVIEW_PRUNED_EXPERIMENTAL`, `V2_SQRT_BALANCED_RAW` をJSON manifest化
+   - V2はLeRobotのframe-level samplingを考慮し、task frame exposureを `sqrt(min_frames * task_frames)` へdownsample
+   - episode IDsとhash、task/frame distributionを固定して再現可能にする
+6. `50_pi05_dataset_ablation.ipynb`
+   - self-contained preflight
+   - training用public fallbackはcompact `lerobot/libero_plus` v3をrevision pinして取得
+   - static metrics/manifestsが無ければ自動生成
+   - LeRobot v0.4.4 native `DatasetConfig.episodes` でdataset copy無しにvariantを切替
+   - π0.5 LoRA / seed / optimizer steps / effective batchを固定してcheap screening
+   - 初期値は `BS=4 / GA=8 / 150 optimizer steps`
+   - `RUN_ABLATIONS=False` を安全gateとし、設定確認後に明示的にTrueへする
+   - V1_INTEGRITY_ONLYがV0と同一なら重複runをskip
+   - loss / wall time / peak VRAM / manifest hashを保存するが、training lossだけで最終選定しない
 
-`10` はModel Selection側、`20` / `30` はDataset Factory側です。モデル側のGateとDataset Factory側のinventory/quality解析を並列に進め、同期点でcheap ablationへ合流します。
+`10` はModel Selection側、`20` / `30` / `40` / `50` はDataset Factory側です。モデル側のGateとDataset Factory側のinventory/quality/ablationを並列に進め、固定評価の同期点で合流します。
 
 ## Organizer vs public dataset
 
 公開fallbackはColab開発を止めないためのものです。公開LIBERO-plusの結果を、運営 `libero_combined_20hz` の正本Inventoryや最終学習結果として扱ってはいけません。
 
-`20` のInventoryと `30` のStatic Quality Analyzerは公開LIBERO-plusで先に完成させてよいですが、Run A固定前には運営combined datasetへ同じpipelineを再適用します。`success / collision / replayability` はconverted LeRobot dataだけから推測せず、raw simulator stateを確保できた範囲でReplay Validatorを別途実行します。
+`20`〜`50` は公開LIBERO-plusでpipelineを先に完成させてよいですが、Run A固定前には運営combined datasetへ同じInventory / Static Quality / Manifest pipelineを再適用します。`success / collision / replayability` はconverted LeRobot dataだけから推測せず、raw simulator stateを確保できた範囲でReplay Validatorを別途実行します。
 
 ## Comparison contract
 
@@ -66,16 +82,18 @@ Every comparable run must pin:
 5. effective batch size and optimizer-step semantics,
 6. wall time, peak VRAM, latency and task metrics.
 
-Do not select a model using training loss alone. Prefer simulator success plus the PARC-adjacent metrics that can be reproduced locally.
+Do not select a model or dataset using training loss alone. Prefer simulator success plus the PARC-adjacent metrics that can be reproduced locally.
 
 ## Planned sequence
 
 1. Reproduce pi0.5 LoRA smoke and verify GA semantics.
 2. Inventory public metadata now; replace with organizer-data inventory when metadata is available.
 3. Run Static Quality Analyzer V1 and create task-relative REVIEW queue.
-4. Inspect distributions / spot-check REVIEW episodes and freeze V1 Clean rule.
-5. Run cheap V0 Raw / V1 Clean / V2 sqrt-balanced ablations with pi0.5 fixed.
-6. Add SmolVLA and OpenVLA-OFT on the same dataset/eval split.
-7. Compare model choice and later V3/V4/V5 dataset ablations separately.
-8. Research simulator-valid Track3 inverse/reversed demonstrations.
-9. Promote only the strongest configuration to organizer-GPU training.
+4. Freeze safe integrity filtering and experimental statistical-pruning candidates.
+5. Generate fixed eval holdout + V0/V1/V2 episode manifests.
+6. Run cheap V0 Raw / V1 Clean / V2 sqrt-balanced screening with pi0.5 fixed.
+7. Send V0 + promising dataset variants to fixed local/simulator evaluation; do not promote from loss alone.
+8. Add SmolVLA and OpenVLA-OFT on the same dataset/eval split.
+9. Compare model choice and later V3/V4/V5 dataset ablations separately.
+10. Research simulator-valid Track3 inverse/reversed demonstrations.
+11. Promote only the strongest configuration to organizer-GPU training.
