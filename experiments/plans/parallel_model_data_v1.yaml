@@ -1,0 +1,189 @@
+plan_id: parc2026_parallel_model_data_v1
+created_at: 2026-08-29
+objective: >-
+  Use Colab A100 for parallel model selection and dataset engineering, then promote
+  one Run A recipe and an optional Track3 Run B recipe to organizer GPU.
+
+lanes:
+  model_selection:
+    candidates:
+      - pi05
+      - smolvla
+      - openvla_oft
+    stages:
+      - id: M1
+        name: pi05_smoke_ga
+        deliverables:
+          - pi05_smoke_log
+          - ga_verification_log
+          - merged_smoke_checkpoint
+        gate:
+          optimizer_update_semantics: "GA=8 => 8 microsteps per optimizer update"
+      - id: M2
+        name: candidate_bringup
+        contract:
+          - exact_source_revision
+          - exact_checkpoint_revision
+          - common_dataset_manifest
+          - common_eval_split
+          - common_seed
+      - id: M3
+        name: fair_comparison
+        protocols:
+          - equal_data_exposure
+          - equal_wall_time
+      - id: M4
+        name: shortlist
+        max_models: 2
+
+  dataset_factory:
+    organizer_source:
+      dataset: libero_combined_20hz.tar
+      observed_episodes: 19533
+      observed_frames: 3028708
+      frequency_hz: 20
+    stages:
+      - id: D1
+        name: inventory
+        outputs:
+          - episode_inventory.csv
+          - task_inventory.csv
+      - id: D2
+        name: static_quality
+        metrics:
+          - duration_sec
+          - movement
+          - path_length
+          - net_displacement
+          - path_efficiency
+          - jerk
+          - action_rms
+          - idle_ratio
+          - gripper_switch_count
+          - timestamp_integrity
+          - nan_inf
+        outputs:
+          - episode_quality_static.csv
+      - id: D3
+        name: replay_validation
+        optional_until_raw_sim_state_available: true
+        metrics:
+          - replay_attempted
+          - replay_success
+          - task_success
+          - harmful_collision_count
+          - final_state_drift
+          - trajectory_drift
+      - id: D4
+        name: quality_tiering
+        tiers:
+          - Gold
+          - Silver
+          - RejectCandidate
+      - id: D5
+        name: dataset_versions
+        versions:
+          V0: organizer_raw
+          V1: organizer_clean
+          V2: clean_task_balanced
+          V3: balanced_safe_visual_augmentation
+          V4: augmented_public_supplemental
+          V5: public_plus_track3_inverse
+      - id: D6
+        name: task_balancing
+        candidates:
+          - raw_proportional
+          - uniform_task
+          - sqrt_balanced
+      - id: D7
+        name: safe_augmentation
+        candidates:
+          - brightness
+          - contrast
+          - mild_color_jitter
+          - mild_crop_resize
+      - id: D8
+        name: public_supplemental
+        purpose: fill_detected_gaps_not_bulk_growth
+        requirements:
+          - license_recorded
+          - source_revision_recorded
+          - task_mapping
+          - deduplication
+          - schema_compatibility
+      - id: D9
+        name: track3_inverse_factory
+        forbid_naive_action_reversal: true
+        ratios_to_test:
+          - 0.00
+          - 0.05
+          - 0.10
+          - 0.20
+
+sync_points:
+  - id: S0
+    requires:
+      - M1
+      - D1
+    produces:
+      - fixed_common_eval_split
+      - fixed_experiment_manifest
+  - id: S1
+    baseline_model: pi05
+    compare_dataset_versions:
+      - V0
+      - V1
+      - V2
+  - id: S2
+    dataset: best_from_S1
+    compare_models:
+      - pi05
+      - smolvla
+      - openvla_oft
+    promote_max_models: 2
+  - id: S3
+    models: shortlist_from_S2
+    compare_dataset_versions:
+      - V2
+      - V3
+      - V4
+      - V5
+  - id: S4
+    produces:
+      - run_a_recipe
+      - optional_run_b_track3_recipe
+
+required_metrics:
+  training:
+    - train_wall_time
+    - peak_train_vram
+  evaluation:
+    - success_rate
+    - steps_to_success
+    - episode_duration
+    - cartesian_path_length
+    - jerk
+    - inference_latency
+    - peak_inference_vram
+  dataset:
+    - task_coverage
+    - episodes_per_task
+    - source_distribution
+    - quality_tier_distribution
+    - duplicate_rate
+    - inverse_pair_coverage
+
+notebooks:
+  existing:
+    - colab/00_a100_preflight.ipynb
+  planned:
+    - colab/10_pi05_smoke_ga.ipynb
+    - colab/20_dataset_inventory.ipynb
+    - colab/21_dataset_quality_static.ipynb
+    - colab/30_model_benchmark.ipynb
+    - colab/40_dataset_ablation.ipynb
+    - colab/50_track3_inverse_factory.ipynb
+
+next_parallel_deliverables:
+  - colab/10_pi05_smoke_ga.ipynb
+  - colab/20_dataset_inventory.ipynb
