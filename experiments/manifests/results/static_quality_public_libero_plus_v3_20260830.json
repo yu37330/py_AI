@@ -1,0 +1,85 @@
+{
+  "schema_version": 1,
+  "result_id": "static_quality_public_libero_plus_v3_20260830",
+  "source": {
+    "dataset": "lerobot/libero_plus",
+    "revision": "f3f49f426d75030177b18778374005bc12ccd588",
+    "lerobot_codebase_version": "v3.0",
+    "role": "public_proxy_not_organizer_source_of_truth"
+  },
+  "dataset": {
+    "fps": 20.0,
+    "tasks": 40,
+    "episodes_requested": 14347,
+    "episodes_analyzed": 14347,
+    "missing_episode_count": 0,
+    "data_parquet_file_count": 2
+  },
+  "analyzer": {
+    "smooth_window": 5,
+    "robust_z_threshold": 5.0,
+    "idle_motion_threshold": 0.02,
+    "gripper_zero_threshold": 0.1,
+    "static_only": true
+  },
+  "quality": {
+    "ok_episode_count": 13975,
+    "review_candidate_count": 372,
+    "review_candidate_rate": 0.0259287655955949,
+    "integrity_failure_count": 0,
+    "flag_counts": {
+      "duration_sec_outlier": 215,
+      "eef_path_m_outlier": 167,
+      "rms_cart_jerk_smooth_outlier": 49,
+      "idle_ratio_outlier": 15,
+      "motion_action_rms_outlier": 20
+    },
+    "quality_flag_count_distribution": {
+      "0": 13975,
+      "1": 278,
+      "2": 94,
+      "3_plus": 0
+    }
+  },
+  "candidate_variants": {
+    "V0_RAW": {
+      "episodes": 14347,
+      "status": "reference"
+    },
+    "V1_INTEGRITY_ONLY": {
+      "episodes": 14347,
+      "removed": 0,
+      "status": "safe_static_policy"
+    },
+    "V1_MULTI_FLAG_PRUNED_EXPERIMENTAL": {
+      "episodes": 14253,
+      "removed": 94,
+      "rule": "quality_flag_count >= 2",
+      "status": "ablation_only"
+    },
+    "V1_ALL_REVIEW_PRUNED_EXPERIMENTAL": {
+      "episodes": 13975,
+      "removed": 372,
+      "rule": "quality_review_candidate == true",
+      "status": "aggressive_ablation_only"
+    },
+    "V2_SQRT_BALANCED_RAW": {
+      "episodes": 14347,
+      "rule": "sqrt task-count sampling weights on V0_RAW",
+      "status": "balancing_axis"
+    }
+  },
+  "decision": [
+    "REVIEW is not equivalent to Reject",
+    "No automatic statistical pruning is promoted from static evidence alone",
+    "Filtering and task balancing must be ablated as separate axes",
+    "Run A promotion requires rerunning the same analysis on organizer libero_combined_20hz"
+  ],
+  "limitations": [
+    "No task-success validation",
+    "No harmful-collision validation",
+    "No simulator replay validation",
+    "20 Hz jerk is noise-sensitive",
+    "Public fallback dataset is not the organizer source of truth"
+  ]
+}
