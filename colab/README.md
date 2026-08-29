@@ -16,7 +16,7 @@ Use a Colab A100 for model comparison, data ablation, Track3 inverse-data resear
 
 ## Notebook order
 
-`00_a100_preflight.ipynb` remains the recommended first notebook, but `10` and `20` are now **self-contained**. Each notebook repeats the essential preflight steps at the beginning: runtime/GPU check, `/content/parc2026` workspace creation, and `py_AI` clone/update. Therefore a fresh Colab runtime can open `10` or `20` directly without failing because `00` was not executed in the same runtime.
+`00_a100_preflight.ipynb` remains the recommended first notebook, but `10`, `20`, and `30` are **self-contained**. Each repeats the essential preflight steps at the beginning: runtime/GPU check, `/content/parc2026` workspace creation, and `py_AI` clone/update. Therefore a fresh Colab runtime can open them directly without failing because `00` was not executed in the same runtime.
 
 1. `00_a100_preflight.ipynb`
    - GPU / Python / workspace確認
@@ -36,14 +36,21 @@ Use a Colab A100 for model comparison, data ablation, Track3 inverse-data resear
    - LeRobot metadataからtask / episode構成をCSV化
    - raw / uniform / sqrt-balancedのsampling候補を生成
    - success/collision/replayabilityはこの段階では推測しない
+4. `30_static_quality_analyzer.ipynb`
+   - self-contained preflight
+   - dataset priority: explicit `PARC_DATASET_ROOT` → organizer combined → public `Sylvest/libero_plus_lerobot`
+   - public fallbackは `meta + data/**/*.parquet` のみ取得し、videosはdownloadしない
+   - 全episodeについて EEF path/displacement、raw/smoothed jerk、action RMS、idle ratio、gripper switches、timestamp/frame integrityを計測
+   - task-relative robust-zで `REVIEW` 候補を作るが、自動Rejectはしない
+   - task success / collision / replayabilityはReplay Validatorまで保留する
 
-`10` と `20` は並列レーンです。モデル側のGateとDataset Factory側のinventoryを独立に進め、両方が揃った時点でcheap ablationへ進みます。
+`10` はModel Selection側、`20` / `30` はDataset Factory側です。モデル側のGateとDataset Factory側のinventory/quality解析を並列に進め、同期点でcheap ablationへ合流します。
 
 ## Organizer vs public dataset
 
 公開fallbackはColab開発を止めないためのものです。公開LIBERO-plusの結果を、運営 `libero_combined_20hz` の正本Inventoryや最終学習結果として扱ってはいけません。
 
-次に運営GPUを本来の目的で起動したタイミングで、少なくとも `libero_combined_20hz/meta/` を外部へ保存し、`20_dataset_inventory.ipynb` を `PARC_DATASET_ROOT` 指定で再実行します。Run A固定前には `10` も運営combined datasetで短い再確認を行います。
+`20` のInventoryと `30` のStatic Quality Analyzerは公開LIBERO-plusで先に完成させてよいですが、Run A固定前には運営combined datasetへ同じpipelineを再適用します。`success / collision / replayability` はconverted LeRobot dataだけから推測せず、raw simulator stateを確保できた範囲でReplay Validatorを別途実行します。
 
 ## Comparison contract
 
@@ -62,9 +69,10 @@ Do not select a model using training loss alone. Prefer simulator success plus t
 
 1. Reproduce pi0.5 LoRA smoke and verify GA semantics.
 2. Inventory public metadata now; replace with organizer-data inventory when metadata is available.
-3. Establish V0 Raw / task-sampling candidates.
-4. Run cheap V0/V1/V2 dataset ablations with pi0.5 fixed.
-5. Add SmolVLA and OpenVLA-OFT on the same dataset/eval split.
-6. Compare model choice and later V3/V4/V5 dataset ablations separately.
-7. Research simulator-valid Track3 inverse/reversed demonstrations.
-8. Promote only the strongest configuration to organizer-GPU training.
+3. Run Static Quality Analyzer V1 and create task-relative REVIEW queue.
+4. Inspect distributions / spot-check REVIEW episodes and freeze V1 Clean rule.
+5. Run cheap V0 Raw / V1 Clean / V2 sqrt-balanced ablations with pi0.5 fixed.
+6. Add SmolVLA and OpenVLA-OFT on the same dataset/eval split.
+7. Compare model choice and later V3/V4/V5 dataset ablations separately.
+8. Research simulator-valid Track3 inverse/reversed demonstrations.
+9. Promote only the strongest configuration to organizer-GPU training.
