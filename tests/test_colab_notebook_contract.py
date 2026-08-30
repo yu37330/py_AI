@@ -68,6 +68,18 @@ def test_manifest_notebook_is_self_contained_and_freezes_eval_split():
     assert "videos/" not in text
 
 
+def test_trajectory_leakage_notebook_is_self_contained_and_nonvisual():
+    text = _code_text("45_trajectory_group_leakage.ipynb")
+    assert "Path('/content/parc2026')" in text
+    assert "git','clone','https://github.com/yu37330/py_AI.git'" in text
+    assert "lerobot/libero_plus" in text
+    assert "check_trajectory_group_leakage.py" in text
+    assert "--round-decimals','6'" in text
+    assert "Trajectory Leakage Gate:" in text
+    assert "manifest_leakage_report.csv" in text
+    assert "videos/" not in text
+
+
 def test_pi05_dataset_ablation_notebook_has_safety_gate_and_native_episode_manifests():
     text = _code_text("50_pi05_dataset_ablation.ipynb")
     assert "Path('/content/parc2026')" in text

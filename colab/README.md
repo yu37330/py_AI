@@ -16,7 +16,7 @@ Use a Colab A100 for model comparison, data ablation, Track3 inverse-data resear
 
 ## Notebook order
 
-`00_a100_preflight.ipynb` remains the recommended first notebook, but `10`, `20`, `30`, `40`, and `50` are **self-contained**. Each repeats the essential preflight steps at the beginning: runtime/GPU check, `/content/parc2026` workspace creation, and `py_AI` clone/update. Therefore a fresh Colab runtime can open them directly without failing because `00` was not executed in the same runtime.
+`00_a100_preflight.ipynb` remains the recommended first notebook, but `10`, `20`, `30`, `40`, `45`, and `50` are **self-contained**. Each repeats the essential preflight steps at the beginning: runtime check, `/content/parc2026` workspace creation, and `py_AI` clone/update. Therefore a fresh Colab runtime can open them directly without failing because `00` was not executed in the same runtime.
 
 1. `00_a100_preflight.ipynb`
    - GPU / Python / workspace確認
@@ -52,7 +52,15 @@ Use a Colab A100 for model comparison, data ablation, Track3 inverse-data resear
    - `V0_RAW`, `V1_INTEGRITY_ONLY`, `V1_MULTI_FLAG_PRUNED_EXPERIMENTAL`, `V1_ALL_REVIEW_PRUNED_EXPERIMENTAL`, `V2_SQRT_BALANCED_RAW` をJSON manifest化
    - V2はLeRobotのframe-level samplingを考慮し、task frame exposureを `sqrt(min_frames * task_frames)` へdownsample
    - episode IDsとhash、task/frame distributionを固定して再現可能にする
-6. `50_pi05_dataset_ablation.ipynb`
+6. `45_trajectory_group_leakage.ipynb`
+   - self-contained preflight。GPU不要
+   - compact public v3のmeta + trajectory parquetだけを使い、画像・動画はdownloadしない
+   - task + state + action sequenceを量子化SHA256し、`exact_group` を作る
+   - task + action sequenceだけの `action_group` もsoft signalとして作る
+   - fixed evalと各training manifestのtrajectory-group overlapを検査
+   - exact overlapが1件でもあれば `Trajectory Leakage Gate: FAIL`
+   - FAIL時は50を回さず、group-aware fixed eval / train exclusionへmanifestを再設計する
+7. `50_pi05_dataset_ablation.ipynb`
    - self-contained preflight
    - training用public fallbackはcompact `lerobot/libero_plus` v3をrevision pinして取得
    - static metrics/manifestsが無ければ自動生成
@@ -63,13 +71,13 @@ Use a Colab A100 for model comparison, data ablation, Track3 inverse-data resear
    - V1_INTEGRITY_ONLYがV0と同一なら重複runをskip
    - loss / wall time / peak VRAM / manifest hashを保存するが、training lossだけで最終選定しない
 
-`10` はModel Selection側、`20` / `30` / `40` / `50` はDataset Factory側です。モデル側のGateとDataset Factory側のinventory/quality/ablationを並列に進め、固定評価の同期点で合流します。
+`10` はModel Selection側、`20`〜`50` はDataset Factory側です。モデル側のGateとDataset Factory側のinventory/quality/leakage/ablationを並列に進め、固定評価の同期点で合流します。
 
 ## Organizer vs public dataset
 
 公開fallbackはColab開発を止めないためのものです。公開LIBERO-plusの結果を、運営 `libero_combined_20hz` の正本Inventoryや最終学習結果として扱ってはいけません。
 
-`20`〜`50` は公開LIBERO-plusでpipelineを先に完成させてよいですが、Run A固定前には運営combined datasetへ同じInventory / Static Quality / Manifest pipelineを再適用します。`success / collision / replayability` はconverted LeRobot dataだけから推測せず、raw simulator stateを確保できた範囲でReplay Validatorを別途実行します。
+`20`〜`50` は公開LIBERO-plusでpipelineを先に完成させてよいですが、Run A固定前には運営combined datasetへ同じInventory / Static Quality / Manifest / Trajectory-group Leakage pipelineを再適用します。`success / collision / replayability` はconverted LeRobot dataだけから推測せず、raw simulator stateを確保できた範囲でReplay Validatorを別途実行します。
 
 ## Comparison contract
 
@@ -91,9 +99,10 @@ Do not select a model or dataset using training loss alone. Prefer simulator suc
 3. Run Static Quality Analyzer V1 and create task-relative REVIEW queue.
 4. Freeze safe integrity filtering and experimental statistical-pruning candidates.
 5. Generate fixed eval holdout + V0/V1/V2 episode manifests.
-6. Run cheap V0 Raw / V1 Clean / V2 sqrt-balanced screening with pi0.5 fixed.
-7. Send V0 + promising dataset variants to fixed local/simulator evaluation; do not promote from loss alone.
-8. Add SmolVLA and OpenVLA-OFT on the same dataset/eval split.
-9. Compare model choice and later V3/V4/V5 dataset ablations separately.
-10. Research simulator-valid Track3 inverse/reversed demonstrations.
-11. Promote only the strongest configuration to organizer-GPU training.
+6. Run Trajectory-group Leakage Gate. If FAIL, rebuild group-aware holdout before training.
+7. Run cheap V0 Raw / V1 Clean / V2 sqrt-balanced screening with pi0.5 fixed only after the leakage Gate passes.
+8. Send V0 + promising dataset variants to fixed local/simulator evaluation; do not promote from loss alone.
+9. Add SmolVLA and OpenVLA-OFT on the same dataset/eval split.
+10. Compare model choice and later V3/V4/V5 dataset ablations separately.
+11. Research simulator-valid Track3 inverse/reversed demonstrations.
+12. Promote only the strongest configuration to organizer-GPU training.
