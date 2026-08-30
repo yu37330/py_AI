@@ -66,14 +66,19 @@ Use a Colab A100 for model comparison, data ablation, Track3 inverse-data resear
    - `--fail-on-exact-leakage` でもう一度45相当の検査を行う
    - `Group-aware Manifest Gate: PASS` と `Trajectory Leakage Gate: PASS` の両方を必須にする
 8. `50_pi05_dataset_ablation.ipynb`
-   - π0.5 cheap screening本体
-   - **現時点のmain版はlegacy `dataset_ablation_manifests_v1` を参照するため、47 PASS後にgroup-aware manifest専用guardへ更新するまではRUN_ABLATIONS=Trueにしない**
+   - π0.5 group-aware cheap screening本体
+   - legacy `dataset_ablation_manifests_v1` をtrainingには使用せず、`dataset_ablation_manifests_v2_group_aware` のみ許可
+   - fresh runtimeでもStatic Quality → trajectory grouping → group-aware manifestをself-containedで再生成可能
+   - training直前にschema v2 / `group_aware=true` / dataset revision / protected group数を再検証
+   - `check_trajectory_group_leakage.py --fail-on-exact-leakage` を必須Gateとして再実行
+   - public proxyでは protected 674 episodes、V0=13,673 / Multi-flag=13,579 / All-review=13,301 / sqrt-balanced=10,758 を再現Gateにする
    - training用public fallbackはcompact `lerobot/libero_plus` v3をrevision pinして取得
    - LeRobot v0.4.4 native `DatasetConfig.episodes` でdataset copy無しにvariantを切替
    - π0.5 LoRA / seed / optimizer steps / effective batchを固定してcheap screening
    - 初期値は `BS=4 / GA=8 / 150 optimizer steps`
    - `RUN_ABLATIONS=False` を安全gateとし、設定確認後に明示的にTrueへする
-   - loss / wall time / peak VRAM / manifest hashを保存するが、training lossだけで最終選定しない
+   - loss / wall time / peak VRAM / manifest hash / protected episode count / dataset revision / git SHAを保存する
+   - training lossだけで最終選定しない
 
 `10` はModel Selection側、`20`〜`50` はDataset Factory側です。モデル側のGateとDataset Factory側のinventory/quality/leakage/ablationを並列に進め、固定評価の同期点で合流します。
 
@@ -106,7 +111,7 @@ Do not select a model or dataset using training loss alone. Prefer simulator suc
 6. Run Trajectory-group Leakage Gate.
 7. If legacy Gate FAILs, generate group-aware holdout and exclude all eval-group siblings from training.
 8. Re-run Trajectory-group Leakage Gate and require PASS.
-9. Update 50 to accept only group-aware V2 manifests, then run cheap V0 Raw / V1 Clean / V2 sqrt-balanced screening with pi0.5 fixed.
+9. Run group-aware π0.5 cheap V0 Raw / V1 Clean / V2 sqrt-balanced screening in Notebook 50.
 10. Send V0 + promising dataset variants to fixed local/simulator evaluation; do not promote from loss alone.
 11. Add SmolVLA and OpenVLA-OFT on the same dataset/eval split.
 12. Compare model choice and later V3/V4/V5 dataset ablations separately.
