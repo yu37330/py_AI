@@ -4,19 +4,19 @@
 
 ## Goal
 
-Use a Colab A100 for model comparison, data ablation, Track3 inverse-data research, and submission preflight. Keep the organizer GPU for the final candidate training/evaluation runs.
+Use a Colab A100 for model comparison, data ablation, Track3 inverse-data research, and submission preflight. Keep the organizer GPU for the final candidate training/evaluation runs. Large public training datasets should be prefetched on a CPU runtime and persisted to Google Drive before allocating an A100.
 
 ## Repository roles
 
 - `py_AI`: experiment definitions, manifests, benchmark outputs, PARC evaluation/submission code.
 - `/content/vendor/*`: disposable upstream clones such as LeRobot/OpenVLA-OFT. Do not vendor them into this repository.
 - `/content/cache/*`: Hugging Face/model caches and temporary datasets.
-- `/content/parc2026/datasets/*`: disposable organizer/public datasets used in Colab.
-- Google Drive: optional persistence for checkpoints and large generated artifacts only.
+- `/content/parc2026/datasets/*`: fast local staging area used while training/evaluating in the current Colab runtime.
+- Google Drive: persistent source for prefetched datasets/checkpoints/large artifacts. Do not train directly from Drive when local staging is practical.
 
 ## Notebook order
 
-`00_a100_preflight.ipynb` remains the recommended first notebook, but `10`, `20`, `30`, `40`, `45`, `47`, and `50` are **self-contained**. Each repeats the essential preflight steps at the beginning: runtime check, `/content/parc2026` workspace creation, and `py_AI` clone/update. Therefore a fresh Colab runtime can open them directly without failing because `00` was not executed in the same runtime.
+`00_a100_preflight.ipynb` remains the recommended first notebook, but the main notebooks are self-contained. For the public `lerobot/libero_plus` training proxy, use `48` on a CPU runtime first, then switch to A100 and use `49` before `50`.
 
 1. `00_a100_preflight.ipynb`
    - GPU / Python / workspace確認
@@ -65,7 +65,20 @@ Use a Colab A100 for model comparison, data ablation, Track3 inverse-data resear
    - V0/V1/V2をgroup exclusion後に再生成する
    - `--fail-on-exact-leakage` でもう一度45相当の検査を行う
    - `Group-aware Manifest Gate: PASS` と `Trajectory Leakage Gate: PASS` の両方を必須にする
-8. `50_pi05_dataset_ablation.ipynb`
+8. `48_prefetch_training_dataset_to_drive.ipynb`
+   - **CPU runtime専用**。A100を使わない
+   - public `lerobot/libero_plus` のrevisionをpinし、meta/data/videosをGoogle Driveへresumable download
+   - 既定revision: `f3f49f426d75030177b18778374005bc12ccd588`
+   - 保存先: `MyDrive/parc2026-cache/datasets/lerobot_libero_plus_v3_train`
+   - 全required fileの存在/sizeを検証して `.parc_prefetch_complete.json` を保存
+   - `DRIVE PREFETCH GATE: PASS` がA100へ切り替える条件
+9. `49_stage_training_dataset_from_drive.ipynb`
+   - A100 runtime開始直後に実行
+   - Drive completion manifestを検証してから `/content/parc2026/datasets/public_libero_plus_v3_train` へlocal staging
+   - Hugging Face local-dir cache metadataもstageし、Notebook 50の大容量再downloadを避ける
+   - Drive直読みではなくlocal diskから学習する
+   - `LOCAL STAGE GATE: PASS` 後に同runtimeでNotebook 50へ進む
+10. `50_pi05_dataset_ablation.ipynb`
    - π0.5 group-aware cheap screening本体
    - legacy `dataset_ablation_manifests_v1` をtrainingには使用せず、`dataset_ablation_manifests_v2_group_aware` のみ許可
    - fresh runtimeでもStatic Quality → trajectory grouping → group-aware manifestをself-containedで再生成可能
@@ -73,6 +86,7 @@ Use a Colab A100 for model comparison, data ablation, Track3 inverse-data resear
    - `check_trajectory_group_leakage.py --fail-on-exact-leakage` を必須Gateとして再実行
    - public proxyでは protected 674 episodes、V0=13,673 / Multi-flag=13,579 / All-review=13,301 / sqrt-balanced=10,758 を再現Gateにする
    - training用public fallbackはcompact `lerobot/libero_plus` v3をrevision pinして取得
+   - `48 → 49` 済みならlocal-dir cache hitになり、大容量videoを再downloadしない
    - LeRobot v0.4.4 native `DatasetConfig.episodes` でdataset copy無しにvariantを切替
    - π0.5 LoRA / seed / optimizer steps / effective batchを固定してcheap screening
    - 初期値は `BS=4 / GA=8 / 150 optimizer steps`
@@ -111,9 +125,10 @@ Do not select a model or dataset using training loss alone. Prefer simulator suc
 6. Run Trajectory-group Leakage Gate.
 7. If legacy Gate FAILs, generate group-aware holdout and exclude all eval-group siblings from training.
 8. Re-run Trajectory-group Leakage Gate and require PASS.
-9. Run group-aware π0.5 cheap V0 Raw / V1 Clean / V2 sqrt-balanced screening in Notebook 50.
-10. Send V0 + promising dataset variants to fixed local/simulator evaluation; do not promote from loss alone.
-11. Add SmolVLA and OpenVLA-OFT on the same dataset/eval split.
-12. Compare model choice and later V3/V4/V5 dataset ablations separately.
-13. Research simulator-valid Track3 inverse/reversed demonstrations.
-14. Promote only the strongest configuration to organizer-GPU training.
+9. Prefetch the public training proxy to Drive on CPU runtime (`48`), then local-stage it on A100 (`49`).
+10. Run group-aware π0.5 cheap V0 Raw / V1 Clean / V2 sqrt-balanced screening in Notebook 50.
+11. Send V0 + promising dataset variants to fixed local/simulator evaluation; do not promote from loss alone.
+12. Add SmolVLA and OpenVLA-OFT on the same dataset/eval split.
+13. Compare model choice and later V3/V4/V5 dataset ablations separately.
+14. Research simulator-valid Track3 inverse/reversed demonstrations.
+15. Promote only the strongest configuration to organizer-GPU training.
