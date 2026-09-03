@@ -1,16 +1,10 @@
 #!/usr/bin/env python3
 """Run PARC2026 pi0.5 group-aware cheap dataset ablation from Colab.
 
-The Colab notebook is responsible for resolving/staging the dataset and passing:
-  PI05_DATASET_ROOT
-  PI05_DATASET_REPO_ID
-  PI05_DATASET_REVISION (optional)
-  HF_TOKEN
-  RUN_ABLATIONS=true|false
-
-This runner keeps the safety contract in one place:
+Safety contract:
 - build/verify group-aware schema-v2 manifests
 - require exact/action trajectory leakage == 0
+- ensure π0.5 STATE/ACTION q01/q99 normalization stats exist
 - setup LeRobot v0.4.4 training env
 - verify GA=8 by runtime trace
 - only then run the four cheap-screening variants when RUN_ABLATIONS=true
@@ -20,13 +14,17 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
+import shlex
 import shutil
 import subprocess
 import sys
 
 
 def cmd(args, *, cwd=None, env=None):
-    return subprocess.run(args, cwd=cwd, env=env, check=True)
+    print(">>>", shlex.join([str(x) for x in args]), flush=True)
+    child_env = (env or os.environ).copy()
+    child_env.setdefault("PYTHONUNBUFFERED", "1")
+    return subprocess.run(args, cwd=cwd, env=child_env, check=True)
 
 
 def env_bool(name: str, default: bool = False) -> bool:
@@ -60,22 +58,35 @@ def main() -> int:
     git_sha = subprocess.check_output(
         ["git", "-C", str(repo), "rev-parse", "HEAD"], text=True
     ).strip()
-    print("dataset:", dataset_id, "@", dataset_revision)
-    print("dataset root:", dataset_root)
-    print("git:", git_sha)
+    print("dataset:", dataset_id, "@", dataset_revision, flush=True)
+    print("dataset root:", dataset_root, flush=True)
+    print("git:", git_sha, flush=True)
 
-    # Python 3.10 for LeRobot v0.4.4 training.
+    print("\n=== Gate 1/5: Python/data tooling ===", flush=True)
     if shutil.which("uv") is None:
         cmd([sys.executable, "-m", "pip", "install", "-q", "uv"])
     cmd(["uv", "python", "install", "3.10"])
     py310 = subprocess.check_output(["uv", "python", "find", "3.10"], text=True).strip()
-    print("python3.10:", py310)
-
-    # Current-kernel data tooling.
+    print("python3.10:", py310, flush=True)
     cmd([sys.executable, "-m", "pip", "install", "-q", "pyarrow>=16", "pandas>=2"])
     import pandas as pd
 
-    # Static Quality -> legacy split (group table only) -> group-aware schema-v2 manifests.
+    print("\n=== Gate 2/5: π0.5 quantile stats ===", flush=True)
+    quantile_report = root / "outputs" / "pi05_quantile_stats_gate.json"
+    cmd([
+        sys.executable,
+        str(repo / "tools/data/ensure_pi05_quantile_stats.py"),
+        "--root", str(dataset_root),
+        "--report", str(quantile_report),
+    ])
+    qreport = json.loads(quantile_report.read_text())
+    assert set(qreport["features"]) == {"observation.state", "action"}
+    stats = json.loads((dataset_root / "meta" / "stats.json").read_text())
+    for feature in ("observation.state", "action"):
+        assert "q01" in stats[feature] and "q99" in stats[feature]
+    print("PI05 Quantile Stats Gate: PASS", flush=True)
+
+    print("\n=== Gate 3/5: group-aware manifests ===", flush=True)
     static_out = root / "outputs" / "static_quality_v1"
     metrics = static_out / "episode_quality_metrics.csv"
     if not metrics.exists():
@@ -133,13 +144,13 @@ def main() -> int:
 
     matrix = json.loads((manifests / "run_matrix.json").read_text())
     eval_manifest = json.loads((manifests / "FIXED_EVAL_HOLDOUT.json").read_text())
-    print("group-aware:", matrix.get("group_aware"))
-    print("fixed eval:", matrix["fixed_eval"]["episode_count"], "episodes /", matrix["fixed_eval_group_count"], "groups")
-    print("protected:", matrix["protected_episode_count"], f"({matrix['protected_fraction']:.2%})")
+    print("group-aware:", matrix.get("group_aware"), flush=True)
+    print("fixed eval:", matrix["fixed_eval"]["episode_count"], "episodes /", matrix["fixed_eval_group_count"], "groups", flush=True)
+    print("protected:", matrix["protected_episode_count"], f"({matrix['protected_fraction']:.2%})", flush=True)
     for name, row in matrix["variants"].items():
-        print("variant:", name, "episodes=", row["episode_count"], "frames=", row["frame_count"])
+        print("variant:", name, "episodes=", row["episode_count"], "frames=", row["frame_count"], flush=True)
 
-    # Mandatory leakage gate.
+    print("\n=== Gate 4/5: trajectory leakage ===", flush=True)
     leak_v2 = root / "outputs" / "trajectory_group_leakage_v2_group_aware"
     cmd([
         sys.executable,
@@ -178,11 +189,11 @@ def main() -> int:
         for name, n in expected.items():
             assert matrix["variants"][name]["episode_count"] == n
 
-    print("Group-aware Manifest Gate: PASS")
-    print("Trajectory Leakage Gate: PASS")
-    print("TRAINING MANIFEST SAFETY GATE: PASS")
+    print("Group-aware Manifest Gate: PASS", flush=True)
+    print("Trajectory Leakage Gate: PASS", flush=True)
+    print("TRAINING MANIFEST SAFETY GATE: PASS", flush=True)
 
-    # Training environment.
+    print("\n=== Gate 5/5: training env + GA=8 runtime ===", flush=True)
     train_data_root = root / "cache" / "pi05-ablation-group-aware-v2"
     lerobot_root = root / "vendor" / "lerobot-pi05-ablation-v2"
     train_data_root.mkdir(parents=True, exist_ok=True)
@@ -193,9 +204,8 @@ def main() -> int:
         "LEROBOT_ROOT": str(lerobot_root),
     })
     cmd(["bash", "scripts/setup_train.sh"], cwd=pi05_dir, env=setup_env)
-    print("training env: ready")
+    print("training env: ready", flush=True)
 
-    # Mandatory GA=8 runtime probe.
     trace = root / "outputs" / "pi05_ga8_probe_trace.jsonl"
     trace_summary = root / "outputs" / "pi05_ga8_probe_summary.json"
     trace.unlink(missing_ok=True)
@@ -229,22 +239,22 @@ def main() -> int:
         "--expected-steps", "3",
         "--json-out", str(trace_summary),
     ])
-    print(trace_summary.read_text())
-    print("GA Gate: PASS")
+    print(trace_summary.read_text(), flush=True)
+    print("GA Gate: PASS", flush=True)
 
-    print("effective batch: 32")
-    print("variants:", matrix["cheap_ablation_order"])
-    print("manifest schema:", matrix["schema_version"], "group-aware:", matrix["group_aware"])
-    print("RUN_ABLATIONS:", run_ablations)
+    print("effective batch: 32", flush=True)
+    print("variants:", matrix["cheap_ablation_order"], flush=True)
+    print("manifest schema:", matrix["schema_version"], "group-aware:", matrix["group_aware"], flush=True)
+    print("RUN_ABLATIONS:", run_ablations, flush=True)
 
     results_dir = root / "outputs" / "pi05_dataset_ablation_v2_group_aware"
     results_dir.mkdir(parents=True, exist_ok=True)
     result_rows = []
 
     if not run_ablations:
-        print("skip: Gate確認後、実行する時だけ RUN_ABLATIONS=True に変更")
+        print("skip: Gate確認後、実行する時だけ RUN_ABLATIONS=True に変更", flush=True)
         if not (results_dir / "comparison.json").exists():
-            print("no comparison.json yet")
+            print("no comparison.json yet", flush=True)
         return 0
 
     for variant in matrix["cheap_ablation_order"]:
@@ -273,7 +283,7 @@ def main() -> int:
             "RUN_NAME": run_name,
             "HF_TOKEN": os.environ["HF_TOKEN"],
         })
-        print("\n=== RUN", variant, "===")
+        print("\n=== RUN", variant, "===", flush=True)
         cmd(
             ["bash", "-lc", "source env_train.sh && bash scripts/cheap_ablation_pi05.sh"],
             cwd=pi05_dir,
@@ -292,7 +302,7 @@ def main() -> int:
         (results_dir / f"{variant}.json").write_text(json.dumps(row, indent=2) + "\n")
 
     (results_dir / "comparison.json").write_text(json.dumps(result_rows, indent=2) + "\n")
-    print("SCREENING COMPLETE — do not promote from loss alone")
+    print("SCREENING COMPLETE — do not promote from loss alone", flush=True)
     return 0
 
 
