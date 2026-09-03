@@ -1,0 +1,51 @@
+diff --git a/src/lerobot/datasets/sampler.py b/src/lerobot/datasets/sampler.py
+index d0bb20c2..7d5bdb39 100644
+--- a/src/lerobot/datasets/sampler.py
++++ b/src/lerobot/datasets/sampler.py
+@@ -26,6 +26,7 @@ class EpisodeAwareSampler:
+         dataset_from_indices: list[int],
+         dataset_to_indices: list[int],
+         episode_indices_to_use: list | None = None,
++        index_mapping: dict[int, int] | None = None,
+         drop_n_first_frames: int = 0,
+         drop_n_last_frames: int = 0,
+         shuffle: bool = False,
+@@ -37,6 +38,10 @@ class EpisodeAwareSampler:
+             dataset_to_indices: List of indices containing the end of each episode in the dataset.
+             episode_indices_to_use: List of episode indices to use. If None, all episodes are used.
+                                     Assumes that episodes are indexed from 0 to N-1.
++            index_mapping: Optional mapping from absolute dataset frame indices to the relative
++                           row indices of a filtered Hugging Face dataset. This is required when
++                           LeRobotDataset is instantiated with an episode subset because metadata
++                           boundaries remain absolute while the loaded table is compacted.
+             drop_n_first_frames: Number of frames to drop from the start of each episode.
+             drop_n_last_frames: Number of frames to drop from the end of each episode.
+             shuffle: Whether to shuffle the indices.
+@@ -47,7 +52,13 @@ class EpisodeAwareSampler:
+             zip(dataset_from_indices, dataset_to_indices, strict=True)
+         ):
+             if episode_indices_to_use is None or episode_idx in episode_indices_to_use:
+-                indices.extend(range(start_index + drop_n_first_frames, end_index - drop_n_last_frames))
++                frame_indices = range(start_index + drop_n_first_frames, end_index - drop_n_last_frames)
++                if index_mapping is None:
++                    indices.extend(frame_indices)
++                else:
++                    try:
++                        indices.extend(index_mapping[idx] for idx in frame_indices)
++                    except KeyError as exc:
++                        raise ValueError(f"Missing filtered-dataset index mapping for absolute frame {exc.args[0]}") from exc
+ 
+         self.indices = indices
+         self.shuffle = shuffle
+diff --git a/src/lerobot/scripts/lerobot_train.py b/src/lerobot/scripts/lerobot_train.py
+index ea2c490d..6bc3fcd8 100644
+--- a/src/lerobot/scripts/lerobot_train.py
++++ b/src/lerobot/scripts/lerobot_train.py
+@@ -357,6 +357,7 @@ def train(cfg: TrainPipelineConfig, accelerator: Accelerator | None = None):
+             dataset.meta.episodes["dataset_from_index"],
+             dataset.meta.episodes["dataset_to_index"],
+             episode_indices_to_use=dataset.episodes,
++            index_mapping=getattr(dataset, "_absolute_to_relative_idx", None),
+             drop_n_last_frames=cfg.policy.drop_n_last_frames,
+             shuffle=True,
+         )
