@@ -1,4 +1,5 @@
 from pathlib import Path
+import subprocess
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -11,6 +12,17 @@ def test_subset_sampler_patch_maps_absolute_to_filtered_indices():
     assert "index_mapping: dict[int, int] | None = None" in text
     assert "indices.extend(index_mapping[idx] for idx in frame_indices)" in text
     assert 'index_mapping=getattr(dataset, "_absolute_to_relative_idx", None)' in text
+
+
+def test_subset_sampler_patch_is_well_formed_for_git_apply():
+    result = subprocess.run(
+        ["git", "apply", "--numstat", str(PATCH)],
+        cwd=ROOT,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+    )
+    assert result.returncode == 0, result.stdout
 
 
 def test_training_setup_applies_all_patch_files():
