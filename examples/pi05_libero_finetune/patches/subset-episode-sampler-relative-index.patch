@@ -21,7 +21,7 @@ index d0bb20c2..7d5bdb39 100644
              drop_n_first_frames: Number of frames to drop from the start of each episode.
              drop_n_last_frames: Number of frames to drop from the end of each episode.
              shuffle: Whether to shuffle the indices.
-@@ -47,7 +52,13 @@ class EpisodeAwareSampler:
+@@ -47,7 +52,14 @@ class EpisodeAwareSampler:
              zip(dataset_from_indices, dataset_to_indices, strict=True)
          ):
              if episode_indices_to_use is None or episode_idx in episode_indices_to_use:
