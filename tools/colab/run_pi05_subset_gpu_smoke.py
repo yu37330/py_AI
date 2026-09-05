@@ -46,6 +46,25 @@ def main() -> int:
         raise RuntimeError("no NVIDIA GPU detected")
     print("GPU:", gpu, flush=True)
 
+    root.joinpath("outputs").mkdir(parents=True, exist_ok=True)
+
+    # π0.5 uses QUANTILES normalization for observation.state/action.  The public
+    # LIBERO-plus proxy can ship only min/max/mean/std/count, so guarantee q01/q99
+    # before model loading.  The utility is idempotent and exits quickly when the
+    # quantiles are already present (e.g. after restoring a prepared Drive cache).
+    quantile_report = root / "outputs" / "pi05_gpu_subset_smoke_quantile_gate.json"
+    cmd([
+        sys.executable,
+        str(repo / "tools/data/ensure_pi05_quantile_stats.py"),
+        "--root", str(dataset_root),
+        "--report", str(quantile_report),
+    ])
+    stats = json.loads((dataset_root / "meta" / "stats.json").read_text())
+    for feature in ("observation.state", "action"):
+        if "q01" not in stats.get(feature, {}) or "q99" not in stats.get(feature, {}):
+            raise RuntimeError(f"missing q01/q99 after quantile gate: {feature}")
+    print("PI05 Quantile Stats Gate: PASS", flush=True)
+
     info = json.loads((dataset_root / "meta" / "info.json").read_text())
     total_episodes = int(info["total_episodes"])
     last = total_episodes - 1
@@ -53,7 +72,6 @@ def main() -> int:
     if len(subset_eps) < 2:
         raise RuntimeError(f"dataset too small for non-contiguous subset smoke: {total_episodes}")
 
-    root.joinpath("outputs").mkdir(parents=True, exist_ok=True)
     manifest_path = root / "outputs" / "pi05_gpu_subset_smoke_manifest.json"
     ids_bytes = json.dumps(subset_eps, separators=(",", ":")).encode()
     manifest = {
