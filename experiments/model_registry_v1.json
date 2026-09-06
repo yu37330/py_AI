@@ -1,0 +1,35 @@
+{
+  "schema_version": 1,
+  "recorded_at": "2026-09-06",
+  "purpose": "PARC2026 M2/M3 pinned candidate registry; pins are frozen for fair bring-up rather than following moving upstream branches.",
+  "models": [
+    {
+      "id": "pi05",
+      "upstream_repo": "huggingface/lerobot",
+      "framework_revision": "v0.4.4",
+      "base_checkpoint": "lerobot/pi05_libero_base",
+      "dataset_format": "lerobot",
+      "adaptation": "LoRA_r16",
+      "notes": "py_AI training patches and GA runtime gate apply."
+    },
+    {
+      "id": "smolvla",
+      "upstream_repo": "huggingface/lerobot",
+      "upstream_revision": "3f2c29ef7e44b1ddccbcda3b6a63939e53639e9e",
+      "base_checkpoint": "lerobot/smolvla_base",
+      "dataset_format": "lerobot",
+      "adaptation": "candidate_native_lerobot_training",
+      "notes": "Use a separate pinned upstream environment; do not force the pi05 v0.4.4 training venv onto this candidate."
+    },
+    {
+      "id": "openvla_oft",
+      "upstream_repo": "small-zeng/openvla-oft",
+      "upstream_revision": "e4287e94541f459edc4feabc4e181f537cd569a8",
+      "base_checkpoint": "openvla/openvla-7b",
+      "training_entry": "vla-scripts/finetune.py",
+      "dataset_format": "rlds",
+      "adaptation": "OFT_LoRA_r32_candidate",
+      "notes": "M3 requires RLDS converted from the exact selected LeRobot episode pool; upstream modified_libero_rlds is not a fair substitute for this comparison."
+    }
+  ]
+}
