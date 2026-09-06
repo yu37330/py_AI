@@ -1,0 +1,262 @@
+plan_id: parc2026_parallel_model_data_v2
+created_at: 2026-09-06
+supersedes_for_execution: experiments/plans/parallel_model_data_v1.yaml
+objective: >-
+  Finish dataset recipe selection, run a fair three-model comparison, validate
+  Track3 inverse-data adaptation, then promote one common Run A recipe and an
+  optional Track3 Run B continuation to organizer GPU.
+
+current_state:
+  dataset_factory:
+    status: top2_tie_break_required
+    public_proxy:
+      dataset: lerobot/libero_plus
+      revision: f3f49f426d75030177b18778374005bc12ccd588
+      episodes: 14347
+      tasks: 40
+    group_aware_split:
+      status: PASS
+      exact_leakage_group_count: 0
+      action_leakage_group_count: 0
+    screening:
+      model: pi05
+      optimizer_steps: 150
+      result_record: experiments/results/pi05_dataset_screening_fixed_sim_20260906.json
+      fixed_sim:
+        gpu: NVIDIA L4 24GB
+        track: track1
+        tasks: 4
+        episodes_per_task: 8
+        seed: 20260905
+        max_steps: 300
+        total_episodes: 128
+        total_elapsed: "03:43:10"
+        ranking:
+          - variant: V1_MULTI_FLAG_PRUNED_EXPERIMENTAL
+            score: 0.53125
+          - variant: V2_SQRT_BALANCED_RAW
+            score: 0.53125
+          - variant: V0_RAW
+            score: 0.4375
+          - variant: V1_ALL_REVIEW_PRUNED_EXPERIMENTAL
+            score: 0.4375
+  model_selection:
+    status: not_started
+  track3_inverse:
+    status: not_started
+  full_training:
+    status: blocked_by_pretraining_gates
+
+stages:
+  - id: D10
+    name: dataset_top2_tie_break
+    priority: P0
+    candidates:
+      - V1_MULTI_FLAG_PRUNED_EXPERIMENTAL
+      - V2_SQRT_BALANCED_RAW
+    protocol:
+      model: pi05
+      adaptation: LoRA_r16
+      screening_optimizer_steps: 150
+      fixed_sim_contract: same_as_20260906
+      seed: independent_from_20260905
+    promotion_rule:
+      primary: simulator_success_rate
+      secondary:
+        - task_level_stability
+        - training_loss
+        - dataset_size
+        - train_wall_time
+    produces:
+      - provisional_best_dataset_recipe
+      - tie_break_result_json
+
+  - id: M2
+    name: candidate_bringup
+    priority: P1
+    requires:
+      - D10
+    candidates:
+      - pi05
+      - smolvla
+      - openvla_oft
+    common_contract:
+      - exact_upstream_revision
+      - exact_base_checkpoint_revision
+      - same_provisional_dataset_manifest
+      - same_eval_contract
+      - same_seed_set
+      - l4_24gb_inference_feasibility
+      - submission_size_feasibility
+    produces:
+      - model_bringup_manifest
+
+  - id: M3
+    name: fair_model_comparison
+    priority: P1
+    requires:
+      - M2
+    protocols:
+      equal_data_exposure:
+        purpose: compare_sample_efficiency
+        controls:
+          - same_train_episode_pool
+          - same_sampling_policy
+          - comparable_training_samples_seen
+      equal_wall_time:
+        purpose: compare_gpu_cost_efficiency
+        controls:
+          - same_A100_wall_time_budget
+    required_metrics:
+      - simulator_success_rate
+      - steps_to_success
+      - episode_duration
+      - inference_latency
+      - peak_inference_vram
+      - train_wall_time
+      - peak_train_vram
+    promotion:
+      max_models: 2
+      training_loss_alone_is_not_sufficient: true
+
+  - id: G1
+    name: generalization_screening
+    priority: P2
+    requires:
+      - M3
+    models: shortlist_from_M3
+    dataset_candidates:
+      - baseline_best_recipe
+      - safe_visual_augmentation
+      - targeted_public_supplemental
+    safe_augmentation_candidates:
+      - brightness
+      - contrast
+      - mild_color_jitter
+      - mild_crop_resize
+    gate:
+      track1_regression_must_be_checked: true
+      track2_generalization_is_primary_target: true
+
+  - id: T3
+    name: track3_inverse_factory
+    priority: P2
+    requires:
+      - M3
+    forbid_naive_action_reversal: true
+    generation_flow:
+      - define_inverse_task
+      - construct_inverse_initial_state
+      - run_simulator_expert_script_or_policy
+      - verify_task_success
+      - replay_validate
+      - convert_to_lerobot_20hz
+      - register_manifest
+    inverse_mix_ratios:
+      - 0.00
+      - 0.05
+      - 0.10
+      - 0.20
+    evaluation:
+      primary: track3_success_rate
+      regression_gates:
+        - track1_success_rate
+        - track2_success_rate
+    produces:
+      - inverse_dataset_manifest
+      - inverse_ablation_result
+      - run_b_evidence
+
+  - id: S4
+    name: final_recipe_freeze
+    priority: P3
+    requires:
+      - D10
+      - M3
+      - G1
+      - T3
+    organizer_source:
+      dataset: libero_combined_20hz
+      observed_episodes: 19533
+      observed_frames: 3028708
+      frequency_hz: 20
+    actions:
+      - reapply_final_dataset_recipe_to_organizer_source
+      - rerun_leakage_and_integrity_gates
+      - freeze_model_revision
+      - freeze_dataset_manifest
+      - freeze_sampling_policy
+      - freeze_augmentation
+      - freeze_lora_rank
+      - freeze_learning_rate
+      - freeze_batch_and_grad_accum
+      - freeze_seed
+      - freeze_steps_and_save_interval
+    produces:
+      - run_a_recipe
+      - optional_run_b_track3_recipe
+
+  - id: RUN_A
+    name: common_three_track_full_training
+    priority: P3
+    requires:
+      - S4
+    model: best_from_M3
+    optimizer_steps: 20000
+    adaptation: LoRA
+    role: common_track1_track2_track3_candidate
+    checkpoint_policy:
+      save_interval: 1000
+      evaluate_intermediate_candidates: true
+      suggested_eval_steps:
+        - 5000
+        - 10000
+        - 15000
+        - 20000
+    post_training:
+      - select_best_checkpoint_by_fixed_simulator
+      - merge_lora_into_base
+      - evaluate_track1
+      - evaluate_track2
+      - evaluate_track3
+      - validate_l4_24gb_startup_latency_vram
+      - package_offline_submission
+
+  - id: RUN_B
+    name: optional_track3_continuation
+    priority: conditional
+    requires:
+      - RUN_A
+      - T3
+    trigger_all:
+      - run_a_track1_track2_are_acceptable
+      - run_a_track3_is_clearly_weaker
+      - inverse_screening_shows_positive_track3_evidence
+    otherwise: do_not_run
+    adaptation: continuation_from_run_a_with_validated_inverse_mix
+
+hard_rules:
+  - do_not_start_20k_before_model_comparison
+  - do_not_select_dataset_from_training_loss_alone
+  - do_not_use_legacy_episode_level_leaky_split
+  - do_not_use_naive_time_reversal_as_inverse_demo
+  - do_not_assume_public_proxy_recipe_is_final_until_reapplied_to_organizer_source
+  - keep_training_and_submission_environments_separate
+  - require_l4_24gb_inference_feasibility_before_final_submission
+
+next_actions:
+  - id: A1
+    action: run_V1_MULTI_vs_V2_SQRT_tie_break
+    owner: colab
+  - id: A2
+    action: implement_common_model_benchmark_notebook
+    owner: repo
+  - id: A3
+    action: bring_up_pi05_smolvla_openvla_oft
+    owner: colab
+  - id: A4
+    action: implement_track3_inverse_factory
+    owner: repo
+  - id: A5
+    action: freeze_run_a_only_after_all_pretraining_gates_pass
+    owner: organizer_gpu
