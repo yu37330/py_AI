@@ -1,0 +1,110 @@
+{
+  "schema_version": 1,
+  "recorded_at": "2026-09-06",
+  "purpose": "screening evidence for group-aware dataset recipe selection before model comparison and full training",
+  "model": {
+    "name": "pi05",
+    "base_checkpoint": "lerobot/pi05_libero_base",
+    "adaptation": "LoRA r16",
+    "screening_optimizer_steps": 150,
+    "batch_size": 4,
+    "grad_accum": 8,
+    "effective_batch": 32,
+    "learning_rate": 0.00005,
+    "seed": 1000
+  },
+  "dataset": {
+    "id": "lerobot/libero_plus",
+    "revision": "f3f49f426d75030177b18778374005bc12ccd588",
+    "split_contract": "group-aware V2",
+    "trajectory_leakage_gate": "PASS",
+    "note": "public LIBERO-plus proxy used for Dataset Factory screening; final Run A source remains organizer libero_combined_20hz"
+  },
+  "training_screening": [
+    {
+      "variant": "V0_RAW",
+      "train_episodes": 13673,
+      "final_logged_loss_best_effort": 0.458,
+      "wall_sec": 655,
+      "peak_vram_mib": 16930
+    },
+    {
+      "variant": "V1_MULTI_FLAG_PRUNED_EXPERIMENTAL",
+      "train_episodes": 13579,
+      "final_logged_loss_best_effort": 0.439,
+      "wall_sec": 604,
+      "peak_vram_mib": 16930
+    },
+    {
+      "variant": "V1_ALL_REVIEW_PRUNED_EXPERIMENTAL",
+      "train_episodes": 13301,
+      "final_logged_loss_best_effort": 0.473,
+      "wall_sec": 598,
+      "peak_vram_mib": 16930
+    },
+    {
+      "variant": "V2_SQRT_BALANCED_RAW",
+      "train_episodes": 10758,
+      "final_logged_loss_best_effort": 0.458,
+      "wall_sec": 546,
+      "peak_vram_mib": 16930
+    }
+  ],
+  "fixed_sim_eval": {
+    "runtime_gpu": "NVIDIA L4 24GB",
+    "track": "track1",
+    "max_tasks": 4,
+    "episodes_per_task": 8,
+    "episodes_per_variant": 32,
+    "total_episodes": 128,
+    "seed": 20260905,
+    "max_steps": 300,
+    "total_elapsed": "03:43:10",
+    "status": "PASS",
+    "ranking": [
+      {
+        "rank": 1,
+        "variant": "V1_MULTI_FLAG_PRUNED_EXPERIMENTAL",
+        "overall_score": 0.53125,
+        "successes": 17,
+        "episodes": 32
+      },
+      {
+        "rank": 1,
+        "variant": "V2_SQRT_BALANCED_RAW",
+        "overall_score": 0.53125,
+        "successes": 17,
+        "episodes": 32
+      },
+      {
+        "rank": 3,
+        "variant": "V0_RAW",
+        "overall_score": 0.4375,
+        "successes": 14,
+        "episodes": 32
+      },
+      {
+        "rank": 3,
+        "variant": "V1_ALL_REVIEW_PRUNED_EXPERIMENTAL",
+        "overall_score": 0.4375,
+        "successes": 14,
+        "episodes": 32
+      }
+    ],
+    "v2_sqrt_task_success": {
+      "pick_up_the_black_bowl_in_the_top_drawer_of_the_wooden_cabinet_and_place_it_on_the_plate_table_2": 0.375,
+      "pick_up_the_tomato_sauce_and_place_it_in_the_basket_table_27": 0.0,
+      "pick_up_the_milk_and_place_it_in_the_basket_light_15": 0.875,
+      "put_the_bowl_on_the_stove_light_11": 0.875
+    }
+  },
+  "decision": {
+    "status": "TIE_BREAK_REQUIRED",
+    "leaders": [
+      "V1_MULTI_FLAG_PRUNED_EXPERIMENTAL",
+      "V2_SQRT_BALANCED_RAW"
+    ],
+    "do_not_do": "Do not start 20k full training from this result alone.",
+    "next_gate": "Repeat fixed simulator comparison for the top two recipes with an independent seed, then freeze the provisional best dataset recipe for Stage S2 model comparison."
+  }
+}
