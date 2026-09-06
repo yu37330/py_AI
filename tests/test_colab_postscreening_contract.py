@@ -26,6 +26,16 @@ def test_model_benchmark_three_candidates_and_two_protocols():
     assert "openvla_selected_subset_rlds_missing" in text
 
 
+def test_generalization_requires_m3_and_track1_regression_gate():
+    text = _text("colab/75_generalization_screening_a100.ipynb")
+    assert "model_shortlist.json" in text
+    assert "track2_success_rate" in text
+    assert "track1_success_rate" in text
+    for aug in ("brightness", "contrast", "mild_color_jitter", "mild_crop_resize"):
+        assert aug in text
+    assert "targeted_public_supplemental" in text
+
+
 def test_track3_forbids_naive_reversal_and_preregisters_ratios():
     text = _text("colab/80_track3_inverse_factory.ipynb")
     assert "forbid_naive_action_reversal" in text
