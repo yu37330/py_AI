@@ -17,6 +17,15 @@ def test_top2_tiebreak_contract():
     assert "provisional_best_dataset_recipe.json" in text
 
 
+def test_model_benchmark_smoke_is_lightweight_and_non_training():
+    text = _text("colab/69_model_benchmark_bringup_smoke.ipynb")
+    assert "V2_SQRT_BALANCED_RAW" in text
+    assert "model-benchmark-smoke-v1" in text
+    assert "openvla_selected_subset_rlds_missing" in text
+    assert "No training or model-weight loading was performed" in text
+    assert "lerobot-smolvla" in text and "openvla-oft" in text
+
+
 def test_model_benchmark_three_candidates_and_two_protocols():
     text = _text("colab/70_model_benchmark_a100.ipynb")
     for model in ("pi05", "smolvla", "openvla_oft"):
