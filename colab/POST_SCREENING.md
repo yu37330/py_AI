@@ -20,9 +20,12 @@ This sequence implements `experiments/plans/parallel_model_data_v2.yaml`. It int
    - OpenVLA-OFT is blocked until the exact selected LeRobot subset has a provenance-matched RLDS conversion
    - target promotion is at most two models
 
-3. Generalization screening (next implementation after M3 results)
+3. `75_generalization_screening_a100.ipynb`
+   - requires M3 shortlist (max two models)
    - baseline best recipe vs safe visual augmentation / targeted public supplemental data
+   - candidates: brightness, contrast, mild color jitter, mild crop-resize, provenance-gated supplemental data
    - Track1 regression gate; Track2 is the primary generalization target
+   - writes `generalization_result.json` only after comparable candidate results exist
 
 4. `80_track3_inverse_factory.ipynb`
    - can prepare the registry before M3, but inverse ablation requires the M3 shortlist
@@ -34,6 +37,7 @@ This sequence implements `experiments/plans/parallel_model_data_v2.yaml`. It int
 5. Reapply the final recipe to organizer `libero_combined_20hz`
    - rerun inventory / integrity / trajectory-group leakage gates
    - public `lerobot/libero_plus` is only the screening proxy
+   - this execution depends on the selected M3/G1/T3 recipe and remains a later organizer-side step
 
 6. `90_run_a_freeze.ipynb`
    - requires D10, M3, G1, T3 and organizer-source gates
