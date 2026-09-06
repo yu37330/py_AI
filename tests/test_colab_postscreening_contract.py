@@ -26,6 +26,39 @@ def test_model_benchmark_smoke_is_lightweight_and_non_training():
     assert "lerobot-smolvla" in text and "openvla-oft" in text
 
 
+def test_openvla_rlds_bridge_smoke_is_exact_and_capacity_gated():
+    text = _text("colab/69b_openvla_selected_rlds_smoke.ipynb")
+    assert "V2_SQRT_BALANCED_RAW" in text
+    assert "--max-episodes','8'" in text
+    assert "bridge_smoke_report.json" in text
+    assert "STREAMING_BRIDGE_RECOMMENDED" in text
+    assert "conversion_contract.json" in text
+    assert "full RLDS" in text
+
+    bridge = (ROOT / "tools/data/convert_lerobot_manifest_to_openvla_rlds.py").read_text()
+    for token in (
+        "observation.images.front",
+        "observation.images.wrist",
+        "episode_ids_sha256",
+        "builder_from_directory",
+        "projected_full_gib",
+        "raw_action_preserved",
+        "no_noop_filter_applied",
+    ):
+        assert token in bridge
+    assert "conversion_contract.json intentionally NOT written" in bridge
+
+
+def test_model_benchmark_budget_is_frozen_screening_contract():
+    budget = json.loads((ROOT / "experiments/plans/model_benchmark_budget_v1.json").read_text())
+    assert budget["status"] == "FROZEN"
+    assert budget["selected_dataset_variant"] == "V2_SQRT_BALANCED_RAW"
+    assert budget["equal_data_exposure"]["sample_budget"] == 4800
+    assert budget["equal_wall_time"]["train_loop_sec"] == 1800
+    assert budget["promotion"]["max_models"] == 2
+    assert budget["promotion"]["training_loss_alone_is_not_sufficient"] is True
+
+
 def test_model_benchmark_three_candidates_and_two_protocols():
     text = _text("colab/70_model_benchmark_a100.ipynb")
     for model in ("pi05", "smolvla", "openvla_oft"):
