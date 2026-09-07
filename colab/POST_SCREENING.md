@@ -14,21 +14,27 @@ This sequence implements `experiments/plans/parallel_model_data_v2.yaml`. It int
 2. `69_model_benchmark_bringup_smoke.ipynb`
    - lightweight preflight before allocating an A100 to M2/M3
    - CPU / L4 / A100 are all accepted because no model-weight training or inference is started
-   - verifies the D10 winner, Drive-prefetched dataset metadata/q01/q99, exact model registry, and pinned SmolVLA/OpenVLA-OFT source revisions
-   - does not copy the ~15GB dataset to local storage and does not load large model weights
-   - writes `model-benchmark-smoke-v1/smoke_report.json` to Drive
-   - current result: all expected preflight gates PASS; OpenVLA selected-subset RLDS remains missing
+   - verifies D10, Drive metadata/q01/q99, registry and pinned sources
+   - does not copy the ~15GB dataset locally or load large model weights
+   - current result: preflight PASS; selected-subset OpenVLA RLDS remains missing
 
 3. `69b_openvla_selected_rlds_smoke.ipynb`
-   - CPU / L4 / A100; no model training
-   - resolves/rebuilds the exact group-aware `V2_SQRT_BALANCED_RAW` manifest
-   - converts only 8 exact selected episodes from LeRobot v3/20Hz into the upstream OpenVLA-style RLDS/TFDS feature schema
-   - preserves source state8/action7 values and maps `observation.images.front` / `wrist` to `image` / `wrist_image`
-   - does not apply an extra no-op filter because M3 requires the same selected episode pool across models
-   - validates the generated TFDS with `builder_from_directory`
-   - writes bytes/frame and projected full-conversion GiB to `openvla-rlds-selected-v1/bridge_smoke_report.json`
-   - if projected full materialisation exceeds 35 GiB, prefer a streaming LeRobot→OpenVLA adapter instead of duplicating all video frames as TFRecords
-   - intentionally does **not** write `conversion_contract.json` during the 8-episode smoke
+   - **Recovery version: run its only code cell once. Do not run the old 2/5, 3/5 or 4/5 cells.**
+   - the notebook uses a separate, pinned code checkout and invokes `tools/colab/rlds_smoke_recovery.py`
+   - CPU / L4 / A100; no model training, no full RLDS materialisation
+   - requires the D10 `V2_SQRT_BALANCED_RAW` decision and an exact group-aware training manifest with valid episode IDs/hash
+   - preserves existing source/data/decision/manifest artifacts; never silently reselects or regenerates a different pool
+   - reuses a verified Python 3.10 conversion environment, otherwise installs binary-only pinned dependencies (`av==12.3.0`)
+   - converts only 8 exact selected episodes (`--max-episodes 8`) from LeRobot v3/20Hz into OpenVLA-style RLDS/TFDS
+   - uses front/wrist images, state8/action7 and task language; no extra no-op filtering
+   - conversion runs in a dedicated new local attempt directory; a failed attempt cannot be mistaken for a previously successful report
+   - verifies report provenance/counts and prepared TFDS; existing artifacts are reused only after matching checks
+   - prints the child error tail on failure and saves complete logs under `openvla-rlds-selected-v1/logs/`
+   - the authoritative status is `openvla-rlds-selected-v1/bridge_smoke_status.json`; only `status=PASS` means 69b completed
+   - success writes `bridge_smoke_report.json` and `bridge_capacity_decision.json`; failure leaves capacity `BLOCKED` and preserves the previous capacity result under `history/`
+   - if projected full materialisation exceeds 35 GiB, prefer a validated streaming bridge; this threshold is a planning heuristic, not an automatic conversion command
+   - the 8-episode smoke never creates a full `conversion_contract.json`
+   - if the exact original manifest is unavailable, restore it from the completed dataset-screening artifacts; do not silently create a new dataset selection
 
 4. M3 screening budget
    - frozen in `experiments/plans/model_benchmark_budget_v1.json`
@@ -44,6 +50,7 @@ This sequence implements `experiments/plans/parallel_model_data_v2.yaml`. It int
    - requires the same group-aware selected episode pool and evaluation contract
    - comparison protocols are Equal Data Exposure and Equal Wall Time
    - OpenVLA-OFT remains blocked until the exact selected episode pool has a provenance-matched full RLDS conversion or an explicitly validated streaming-equivalent bridge
+   - **69b success does not unblock M3 by itself.** The actual three-model training and inference adapters still require implementation and runtime verification.
    - target promotion is at most two models
 
 6. `75_generalization_screening_a100.ipynb`
