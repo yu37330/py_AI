@@ -1,0 +1,42 @@
+{
+  "schema_version": 1,
+  "stage": "M3_fair_model_comparison_screening",
+  "status": "FROZEN",
+  "selected_dataset_variant": "V2_SQRT_BALANCED_RAW",
+  "purpose": "Short screening budget for pi0.5 / SmolVLA / OpenVLA-OFT before any long training.",
+  "equal_data_exposure": {
+    "sample_budget": 4800,
+    "definition": "Number of training examples consumed by each model, independent of micro-batch or gradient accumulation.",
+    "rationale": "Matches the proven pi0.5 dataset-screen scale: 150 optimizer steps x effective batch 32 = 4800 sample visits.",
+    "same_episode_pool": true,
+    "same_sampling_policy": true
+  },
+  "equal_wall_time": {
+    "train_loop_sec": 1800,
+    "definition": "Measured training-loop wall time only; environment setup, source/model download, dataset staging/conversion, checkpoint merge and simulator evaluation are excluded.",
+    "rationale": "Thirty minutes per candidate is roughly 3x the slowest 4800-sample pi0.5 screening run and gives the larger candidates a meaningful cost-efficiency window without turning M3 into full training."
+  },
+  "evaluation": {
+    "same_seed_set": [20260906, 20260907],
+    "max_steps_per_episode": 300,
+    "required_metrics": [
+      "simulator_success_rate",
+      "steps_to_success",
+      "episode_duration",
+      "inference_latency",
+      "peak_inference_vram",
+      "train_wall_time",
+      "peak_train_vram"
+    ]
+  },
+  "promotion": {
+    "max_models": 2,
+    "primary": "simulator_success_rate",
+    "training_loss_alone_is_not_sufficient": true
+  },
+  "notes": [
+    "This is a screening budget, not the Run A 20k budget.",
+    "A model may complete the equal-data protocol before 1800 s; the equal-wall-time protocol is a separate run/measurement.",
+    "Do not count setup/download/conversion time as model training time."
+  ]
+}
