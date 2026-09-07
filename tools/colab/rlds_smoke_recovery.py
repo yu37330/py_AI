@@ -1,21 +1,21 @@
 #!/usr/bin/env python3
-"""Single-entrypoint recovery runner for notebook 69b. No GPU training.
+"""Fail-fast, resumable 69b smoke runner. No model loading or training.
 
-Preserves the source dataset, D10 decision, existing manifests and completed
-artifacts. A failure is terminal for this invocation and is recorded in a
-separate status file; it never turns into a successful capacity decision.
+Use only the D10-selected episode pool. Preserve source and completed artifacts;
+never silently reselect data or treat an old report as a new success.
 """
 from __future__ import annotations
 
 import argparse
 import hashlib
 import json
+import math
 import os
 import shutil
 import subprocess
 import sys
 import time
-import traceback
+import uuid
 from pathlib import Path
 
 VARIANT = "V2_SQRT_BALANCED_RAW"
@@ -30,8 +30,7 @@ def read_json(path):
 
 
 def write_json(path, value):
-    path = Path(path)
-    path.parent.mkdir(parents=True, exist_ok=True)
+    path = Path(path); path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_name(path.name + ".tmp")
     tmp.write_text(json.dumps(value, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     os.replace(tmp, path)
@@ -42,8 +41,7 @@ def ids_hash(ids):
 
 
 def validate_manifest(path):
-    m = read_json(path)
-    ids = m.get("episode_ids")
+    m = read_json(path); ids = m.get("episode_ids")
     if m.get("schema_version") != 2 or m.get("group_aware") is not True or m.get("kind") != "training_episode_manifest" or m.get("variant") != VARIANT:
         raise ValueError(f"Not the selected group-aware training manifest: {path}")
     if m.get("dataset_id") != DATASET_ID or m.get("dataset_revision") != REVISION:
@@ -64,14 +62,10 @@ def find_manifest(drive, local):
                   drive / "pi05-ablation-group-aware-v2/dataset_ablation_manifests_v2_group_aware" / name,
                   drive / "pi05-ablation-group-aware-v2/outputs/dataset_ablation_manifests_v2_group_aware" / name,
                   drive / "dataset_ablation_manifests_v2_group_aware" / name]
-    valid = []
-    for path in candidates:
-        if path.is_file():
-            valid.append((path, validate_manifest(path)))
+    valid = [(p, validate_manifest(p)) for p in candidates if p.is_file()]
     if not valid:
         raise FileNotFoundError("Exact V2 manifest not found. Restore the original group-aware manifest from the completed dataset-screening run. Automatic reselection is disabled to avoid changing the D10 input.")
-    hashes = {m["episode_ids_sha256"] for _, m in valid}
-    if len(hashes) != 1:
+    if len({m["episode_ids_sha256"] for _, m in valid}) != 1:
         raise ValueError("Conflicting selected manifests; refusing to choose one silently")
     return valid[0]
 
@@ -87,6 +81,8 @@ def validate_report(report, manifest, expected_ids, prepared_required=True):
         raise ValueError("Smoke report episode IDs/count mismatch")
     if report.get("tfds_builder_from_directory") != "PASS" or int(report.get("converted_frames", 0)) <= 0:
         raise ValueError("Smoke report TFDS/frame gate failed")
+    if int(report["source_frame_count"]) != int(manifest["summary"]["frame_count"]):
+        raise ValueError("Smoke report source frame count mismatch")
     for key in ("raw_action_preserved", "raw_state_preserved", "no_noop_filter_applied"):
         if report.get(key) is not True:
             raise ValueError(f"Smoke report {key} missing")
@@ -99,7 +95,7 @@ def validate_report(report, manifest, expected_ids, prepared_required=True):
 
 def capacity_decision(report, manifest, threshold=35.0):
     projected = float(report["projected_full_gib"])
-    if not 0 < projected < float("inf"):
+    if not math.isfinite(projected) or projected <= 0:
         raise ValueError("Invalid full-capacity projection")
     decision = "MATERIALIZE_CANDIDATE" if projected <= threshold else "STREAMING_BRIDGE_RECOMMENDED"
     return {"schema_version": 1, "status": "PASS", "selected_dataset_variant": VARIANT,
@@ -113,23 +109,21 @@ def capacity_decision(report, manifest, threshold=35.0):
 
 def run_logged(cmd, label, log_dir, *, env=None, cwd=None, interval=30):
     log_dir = Path(log_dir); log_dir.mkdir(parents=True, exist_ok=True)
-    log = log_dir / (label + ".log")
-    start = time.monotonic()
+    log = log_dir / (label + ".log"); start = time.monotonic()
     print(f"[start] {label}; log={log}", flush=True)
     with log.open("w", encoding="utf-8") as f:
         p = subprocess.Popen(list(map(str, cmd)), stdout=f, stderr=subprocess.STDOUT, env=env, cwd=cwd)
-        last = ""
         while True:
             try:
-                rc = p.wait(timeout=interval)
-                break
+                rc = p.wait(timeout=interval); break
             except subprocess.TimeoutExpired:
+                tail = log.read_text(encoding="utf-8", errors="replace").splitlines()[-5:]
                 try:
-                    tail = log.read_text(encoding="utf-8", errors="replace").splitlines()[-5:]
-                    last = " | ".join(tail)[-500:]
-                except OSError:
-                    pass
-                print(f"[heartbeat] {label} elapsed={(time.monotonic()-start)/60:.1f}m {last}", flush=True)
+                    gpu = subprocess.check_output(["nvidia-smi", "--query-gpu=name,utilization.gpu,memory.used,memory.total", "--format=csv,noheader,nounits"], text=True, stderr=subprocess.DEVNULL, timeout=5).strip()
+                except (OSError, subprocess.SubprocessError):
+                    gpu = "CPU/no nvidia-smi"
+                free = shutil.disk_usage(str(log_dir)).free / 1024**3
+                print(f"[heartbeat] {label} elapsed={(time.monotonic()-start)/60:.1f}m gpu={gpu} free={free:.1f}GiB {' | '.join(tail)[-500:]}", flush=True)
         text = log.read_text(encoding="utf-8", errors="replace")
         if rc:
             print(text[-16000:], flush=True)
@@ -139,11 +133,9 @@ def run_logged(cmd, label, log_dir, *, env=None, cwd=None, interval=30):
 
 
 def ensure_env(root, log_dir):
-    venv = root / "venv-openvla-rlds"
-    py = venv / "bin/python"
+    venv = root / "venv-openvla-rlds"; py = venv / "bin/python"
     if py.exists() and subprocess.run([str(py), "-c", CHECK], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode == 0:
-        print("[reuse] verified conversion environment", flush=True)
-        return py
+        print("[reuse] verified conversion environment", flush=True); return py
     uv = shutil.which("uv")
     if not uv:
         run_logged([sys.executable, "-m", "pip", "install", "uv"], "install-uv", log_dir)
@@ -158,12 +150,19 @@ def ensure_env(root, log_dir):
 
 def run(args, *, exec_command=run_logged):
     root = Path(args.root); repo = Path(args.repo); drive = Path(args.drive)
-    out = drive / "openvla-rlds-selected-v1"
+    out = drive / "openvla-rlds-selected-v1"; out.mkdir(parents=True, exist_ok=True)
     log_dir = out / "logs"; log_dir.mkdir(parents=True, exist_ok=True)
     status_path = out / "bridge_smoke_status.json"
     report_path = out / "bridge_smoke_report.json"
     capacity_path = out / "bridge_capacity_decision.json"
-    status = {"schema_version": 1, "stage": "69b", "status": "RUNNING", "last_completed_stage": None, "error": None}
+    attempt = uuid.uuid4().hex[:12]
+    status = {"schema_version": 1, "stage": "69b", "attempt_id": attempt, "status": "RUNNING", "last_completed_stage": None, "error": None}
+    # Keep an old successful decision as history, never present it as this run's result.
+    if capacity_path.exists():
+        history = out / "history"; history.mkdir(exist_ok=True)
+        shutil.copy2(capacity_path, history / f"bridge_capacity_decision_{attempt}.json")
+    write_json(capacity_path, {"schema_version": 1, "status": "BLOCKED", "attempt_id": attempt, "reason": "69b verification in progress"})
+    write_json(status_path, status)
     def mark(stage, state="RUNNING", error=None):
         status.update(status=state, last_completed_stage=stage, error=error)
         write_json(status_path, status)
@@ -176,31 +175,32 @@ def run(args, *, exec_command=run_logged):
             raise FileNotFoundError("Prefetched source dataset is incomplete")
         manifest_path, manifest = find_manifest(drive, root)
         expected_ids = manifest["episode_ids"][:8]
-        mark("preflight")
-        print("[1/3] D10 and exact manifest PASS", flush=True)
+        mark("preflight"); print("[1/3] D10 and exact manifest PASS", flush=True)
         py = ensure_env(root, log_dir)
-        mark("dependencies")
-        print("[2/3] Conversion environment PASS", flush=True)
+        mark("dependencies"); print("[2/3] Conversion environment PASS", flush=True)
+        report = None
         if report_path.exists() and not args.force:
             try:
                 report = validate_report(read_json(report_path), manifest, expected_ids)
+                # Revalidate TFDS readability in the isolated conversion environment.
+                check = "import sys, tensorflow_datasets as tfds; b=tfds.builder_from_directory(sys.argv[1]); x=next(iter(tfds.as_numpy(b.as_dataset(split='train').take(1)))); assert 'steps' in x and 'episode_metadata' in x; print('prepared TFDS reuse gate PASS')"
+                exec_command([str(py), "-c", check, report["prepared_dir"]], "verify-existing-tfds", log_dir)
                 print("[reuse] existing provenance-matched smoke report", flush=True)
-            except (ValueError, KeyError, TypeError, FileNotFoundError, json.JSONDecodeError) as exc:
-                print(f"[rebuild] existing report is not reusable: {exc}", flush=True)
-                report = None
-        else:
-            report = None
+            except (ValueError, KeyError, TypeError, FileNotFoundError, json.JSONDecodeError, RuntimeError) as exc:
+                print(f"[rebuild] existing report is not reusable: {exc}", flush=True); report = None
         if report is None:
-            smoke_root = root / "openvla-rlds-smoke-v1"
-            # Never delete the entire smoke root, the source dataset or any Drive artifact.
-            # The converter has its own explicit --overwrite for its dedicated TFDS output.
+            # An isolated attempt prevents stale reports/partial TFDS from being reused.
+            smoke_root = root / "openvla-rlds-smoke-v1" / attempt
+            staged_report = smoke_root / "bridge_smoke_report.json"
             env = os.environ.copy(); env.update(TF_CPP_MIN_LOG_LEVEL="2", TF_NUM_INTEROP_THREADS="2", TF_NUM_INTRAOP_THREADS="2", PYTHONUNBUFFERED="1")
-            exec_command([str(py), "-u", str(repo / "tools/data/convert_lerobot_manifest_to_openvla_rlds.py"), "--lerobot-root", str(source), "--manifest", str(manifest_path), "--out-root", str(smoke_root), "--report", str(report_path), "--dataset-repo-id", DATASET_ID, "--dataset-revision", REVISION, "--max-episodes", "8", "--overwrite"], "rlds-8ep-conversion", log_dir, env=env)
-            if not report_path.is_file():
-                raise RuntimeError(f"Converter returned success but did not create {report_path}; inspect {log_dir / 'rlds-8ep-conversion.log'}")
-            report = validate_report(read_json(report_path), manifest, expected_ids)
+            exec_command([str(py), "-u", str(repo / "tools/data/convert_lerobot_manifest_to_openvla_rlds.py"), "--lerobot-root", str(source), "--manifest", str(manifest_path), "--out-root", str(smoke_root), "--report", str(staged_report), "--dataset-repo-id", DATASET_ID, "--dataset-revision", REVISION, "--max-episodes", "8"], "rlds-8ep-conversion", log_dir, env=env)
+            if not staged_report.is_file():
+                raise RuntimeError(f"Converter returned success but did not create {staged_report}; inspect {log_dir / 'rlds-8ep-conversion.log'}")
+            report = validate_report(read_json(staged_report), manifest, expected_ids)
+            write_json(report_path, report)
         mark("conversion")
         capacity = capacity_decision(report, manifest)
+        capacity["attempt_id"] = attempt
         write_json(capacity_path, capacity)
         mark("capacity", "PASS")
         print(json.dumps(report, ensure_ascii=False, indent=2), flush=True)
@@ -211,6 +211,7 @@ def run(args, *, exec_command=run_logged):
     except Exception as exc:
         status.update(status="FAILED", error=f"{type(exc).__name__}: {exc}")
         write_json(status_path, status)
+        write_json(capacity_path, {"schema_version": 1, "status": "BLOCKED", "attempt_id": attempt, "reason": status["error"]})
         print(f"=== 69b FAILED at {status['last_completed_stage']} ===", flush=True)
         print(status["error"], flush=True)
         print(f"Logs: {log_dir}", flush=True)
@@ -222,10 +223,8 @@ def main(argv=None):
     p.add_argument("--root", type=Path, default=Path("/content/parc2026"))
     p.add_argument("--repo", type=Path, default=Path("/content/parc2026/py_AI"))
     p.add_argument("--drive", type=Path, default=Path("/content/drive/MyDrive/parc2026-cache"))
-    p.add_argument("--force", action="store_true", help="Rebuild only the dedicated local 8-episode smoke output")
-    args = p.parse_args(argv)
-    run(args)
-    return 0
+    p.add_argument("--force", action="store_true", help="Rebuild only a new isolated local 8-episode smoke attempt")
+    args = p.parse_args(argv); run(args); return 0
 
 
 if __name__ == "__main__":
