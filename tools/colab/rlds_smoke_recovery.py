@@ -21,8 +21,9 @@ from pathlib import Path
 VARIANT = "V2_SQRT_BALANCED_RAW"
 REVISION = "f3f49f426d75030177b18778374005bc12ccd588"
 DATASET_ID = "lerobot/libero_plus"
-DEPS = ["numpy<2", "pandas>=2,<3", "pyarrow>=16", "tensorflow-cpu==2.17.1", "tensorflow-datasets==4.9.6", "av==12.3.0"]
-CHECK = "import sys, numpy, pandas, pyarrow, tensorflow as tf, tensorflow_datasets as tfds, av; assert sys.version_info[:2] == (3,10); assert tf.__version__ == '2.17.1'; assert tfds.__version__ == '4.9.6'; assert av.__version__ == '12.3.0'; print('conversion dependencies verified', flush=True)"
+DEPS = ["numpy<2", "pandas>=2,<3", "pyarrow>=16", "tensorflow-cpu==2.17.1", "tensorflow-datasets==4.9.6", "av==12.3.0", "promise==2.3"]
+PROMISE = "promise==2.3"
+CHECK = "import sys, importlib.metadata as md, numpy, pandas, pyarrow, tensorflow as tf, tensorflow_datasets as tfds, av; assert sys.version_info[:2] == (3,10); assert tf.__version__ == '2.17.1'; assert tfds.__version__ == '4.9.6'; assert av.__version__ == '12.3.0'; assert md.version('promise') == '2.3'; print('conversion dependencies verified', flush=True)"
 
 
 def read_json(path):
@@ -132,6 +133,18 @@ def run_logged(cmd, label, log_dir, *, env=None, cwd=None, interval=30):
     return text
 
 
+def install_conversion_deps(uv, py, log_dir, *, exec_command=run_logged):
+    """Build only the pinned promise exception, then require wheels for all deps."""
+    # promise 2.3 is sdist-only. Install it without runtime dependencies first.
+    # All remaining packages, including PyAV, retain the wheel-only contract.
+    exec_command([uv, "pip", "install", "--python", str(py),
+                  "--no-deps", "--no-binary-package", "promise", PROMISE],
+                 "rlds-promise-build", log_dir)
+    exec_command([uv, "pip", "install", "--python", str(py),
+                  "--only-binary", ":all:", *DEPS],
+                 "rlds-conversion-deps", log_dir)
+
+
 def ensure_env(root, log_dir):
     venv = root / "venv-openvla-rlds"; py = venv / "bin/python"
     if py.exists() and subprocess.run([str(py), "-c", CHECK], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode == 0:
@@ -143,7 +156,7 @@ def ensure_env(root, log_dir):
     run_logged([uv, "python", "install", "3.10"], "python310", log_dir)
     if not py.exists():
         run_logged([uv, "venv", "--python", "3.10", str(venv)], "create-venv", log_dir)
-    run_logged([uv, "pip", "install", "--python", str(py), "--only-binary", ":all:", *DEPS], "rlds-conversion-deps", log_dir)
+    install_conversion_deps(uv, py, log_dir)
     run_logged([str(py), "-c", CHECK], "verify-conversion-env", log_dir)
     return py
 
@@ -210,7 +223,7 @@ def run(args, *, exec_command=run_logged):
         return capacity
     except Exception as exc:
         status.update(status="FAILED", error=f"{type(exc).__name__}: {exc}")
-        write_json(status_path, status)
+        write_json(status_path, {"schema_version": 1, "stage": "69b", "attempt_id": attempt, "status": "FAILED", "last_completed_stage": status["last_completed_stage"], "error": status["error"]})
         write_json(capacity_path, {"schema_version": 1, "status": "BLOCKED", "attempt_id": attempt, "reason": status["error"]})
         print(f"=== 69b FAILED at {status['last_completed_stage']} ===", flush=True)
         print(status["error"], flush=True)
