@@ -29,11 +29,16 @@ def test_model_benchmark_smoke_is_lightweight_and_non_training():
 def test_openvla_rlds_bridge_smoke_is_exact_and_capacity_gated():
     text = _text("colab/69b_openvla_selected_rlds_smoke.ipynb")
     assert "V2_SQRT_BALANCED_RAW" in text
-    assert "--max-episodes','8'" in text
-    assert "bridge_smoke_report.json" in text
-    assert "STREAMING_BRIDGE_RECOMMENDED" in text
+    assert "rlds_smoke_recovery.py" in text
+    assert "bridge_smoke_status.json" in text
     assert "conversion_contract.json" in text
     assert "full RLDS" in text
+    assert "--max-episodes 8" in (ROOT / "colab/POST_SCREENING.md").read_text()
+
+    recovery = (ROOT / "tools/colab/rlds_smoke_recovery.py").read_text()
+    for token in ("--max-episodes", "8", "av==12.3.0", "--only-binary", "SMOKE_PASS", "STREAMING_BRIDGE_RECOMMENDED", "bridge_capacity_decision.json", "bridge_smoke_status.json"):
+        assert token in recovery
+    assert "av>=12,<15" not in recovery
 
     bridge = (ROOT / "tools/data/convert_lerobot_manifest_to_openvla_rlds.py").read_text()
     for token in (
