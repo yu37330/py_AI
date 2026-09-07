@@ -22,17 +22,20 @@ def test_promise_is_only_source_build_exception(tmp_path):
         exec_command=fake_exec,
     )
     assert len(calls) == 2
+
     build, label = calls[0]
     assert label == "rlds-promise-build"
     assert "--no-deps" in build
-    assert build[build.index("--no-binary-package") + 1] == "promise"
+    assert build[build.index("--no-binary") + 1] == "promise"
+    assert "--no-binary-package" not in build
     assert "promise==2.3" in build
+
     install, label = calls[1]
     assert label == "rlds-conversion-deps"
     assert install[install.index("--only-binary") + 1] == ":all:"
     assert "tensorflow-datasets==4.9.6" in install
     assert "av==12.3.0" in install
-    assert "promise==2.3" in install
+    assert "promise==2.3" not in install
 
 
 def test_dependency_failure_stops_before_conversion(tmp_path):
