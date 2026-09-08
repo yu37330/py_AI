@@ -5,8 +5,9 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 NOTEBOOK = ROOT / "colab/69b_openvla_selected_rlds_smoke.ipynb"
-FIXED_PIN = "0148430a26b5a9d862b3fe8f37733d1f7fca7af4"
+FIXED_PIN = "d2e2b2b213aa42bf84a5a90cb41f0e741658e42c"
 OLD_PINS = {
+    "0148430a26b5a9d862b3fe8f37733d1f7fca7af4",
     "b1e6b70d9ee2fcc2941adbcb7a3771edf9f0fda0",
     "73bab2a1d87dd1b2ab80b2e053210a57f731d6f6",
     "5f7cbb4ed4b054b381a3a0074ab54b419b09a5de",
@@ -23,7 +24,7 @@ def code_source():
     )
 
 
-def test_69b_notebook_uses_protobuf_compatible_dependency_fix():
+def test_69b_notebook_uses_script_safe_tfds_converter():
     source = code_source()
     assert FIXED_PIN in source
     for old_pin in OLD_PINS:
@@ -57,4 +58,5 @@ def test_69b_notebook_documents_dependency_exceptions():
     assert "tensorflow-metadata==1.16.1" in markdown
     assert "protobuf==3.20.3" in markdown
     assert "googleapis-common-protos==1.65.0" in markdown
+    assert "pkg_dir_path" in markdown
     assert "bridge_smoke_status.json" in markdown
