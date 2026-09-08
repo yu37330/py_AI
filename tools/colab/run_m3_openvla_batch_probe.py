@@ -44,6 +44,10 @@ def ensure_env(root: Path, source: Path) -> Path:
             ["uv", "pip", "install", "--python", str(python_bin), "packaging", "ninja"],
             check=True,
         )
+        # uv-created venvs are not guaranteed to expose pip as a module. FlashAttention's
+        # upstream recipe explicitly needs a traditional pip PEP-517 build with
+        # --no-build-isolation, so seed pip before following that pinned recipe.
+        subprocess.run([str(python_bin), "-m", "ensurepip", "--upgrade"], check=True)
         subprocess.run(
             [
                 str(python_bin),
