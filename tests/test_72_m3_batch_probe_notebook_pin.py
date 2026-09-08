@@ -7,12 +7,16 @@ ROOT = Path(__file__).resolve().parents[1]
 BASE_PROBE_PIN = "2b961ef03619fea21f36dc902fb8b7b02f793120"
 SMOLVLA_LIBERO_PIN = "5c334095e327c56173e06eed4c5f19fae3fc7878"
 OPENVLA_DIAG_PIN = "ac9a5c403784bbc7624c9055ed6282b27f16b3a3"
+OPENVLA_COMPAT_PIN = "d680d5acae4beed905fdeb7541b33d590d8f314f"
 OLD_PIN = "5baa5e3297ae476fe6f462ebcaac6d988f1a8e43"
+OLD_OPENVLA_DIAG_PIN = "ac9a5c403784bbc7624c9055ed6282b27f16b3a3"
 
 NOTEBOOKS = {
     "72a_m3_pi05_batch_probe.ipynb": ("run_m3_pi05_batch_probe.py", BASE_PROBE_PIN),
     "72b_m3_smolvla_batch_probe.ipynb": ("run_m3_smolvla_batch_probe.py", SMOLVLA_LIBERO_PIN),
     "72c_m3_openvla_oft_batch_probe.ipynb": ("run_m3_openvla_batch_probe.py", OPENVLA_DIAG_PIN),
+    "72b_m3_smolvla_batch_probe.ipynb": ("run_m3_smolvla_batch_probe.py", BASE_PROBE_PIN),
+    "72c_m3_openvla_oft_batch_probe.ipynb": ("run_m3_openvla_batch_probe.py", OPENVLA_COMPAT_PIN),
     "72d_m3_batch_probe_controller.ipynb": ("validate_m3_batch_probes.py", BASE_PROBE_PIN),
 }
 
@@ -67,19 +71,28 @@ def test_72b_surfaces_persisted_result_and_probe_log_diagnostics():
 
 def test_72c_surfaces_persisted_setup_and_probe_diagnostics():
     _, source, markdown = _read_notebook("72c_m3_openvla_oft_batch_probe.ipynb")
-    assert OPENVLA_DIAG_PIN in source
+    assert OPENVLA_COMPAT_PIN in source
+    assert OLD_OPENVLA_DIAG_PIN not in source
     assert "openvla_oft_status.json" in source
     assert "logs/openvla_oft/setup.log" in source
     assert "72c NOTEBOOK DIAGNOSTICS" in source
     assert "72c SETUP LOG TAIL" in source
     assert "72c PROBE LOG TAIL" in source
     assert "失敗時" in markdown
+    assert "TensorFlow Metadata / protobuf互換pin" in markdown
 
     runner = (ROOT / "tools/colab/run_m3_openvla_batch_probe.py").read_text(encoding="utf-8")
     for token in (
         "install_python_310",
         "install_openvla_editable",
         "install_flash_attn",
+        "pin_tf_metadata_protobuf",
+        'TF_METADATA_VERSION = "1.16.1"',
+        'PROTOBUF_VERSION = "3.20.3"',
+        "import tensorflow_datasets as tfds",
+        "import tensorflow_metadata",
+        "import dlimp",
+        "tfds_dlimp_ok",
         "verify_openvla_env",
         "72c DIAGNOSTICS",
         "72c SETUP LOG TAIL",

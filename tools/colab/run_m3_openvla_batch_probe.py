@@ -13,6 +13,8 @@ from typing import Any
 
 OPENVLA_REF = "e4287e94541f459edc4feabc4e181f537cd569a8"
 OPENVLA_URL = "https://github.com/small-zeng/openvla-oft.git"
+TF_METADATA_VERSION = "1.16.1"
+PROTOBUF_VERSION = "3.20.3"
 
 
 def _write_status(
@@ -186,18 +188,51 @@ def ensure_env(root: Path, source: Path, *, status_path: Path, setup_log: Path) 
             setup_log=setup_log,
         )
         marker.write_text(OPENVLA_REF + "\n", encoding="utf-8")
+
+    # OpenVLA's unbounded TFDS dependency can resolve to a future tensorflow-metadata
+    # release whose generated protobuf code is incompatible with TensorFlow 2.15's
+    # protobuf<5 constraint. Keep the Python 3.10 environment on the compatible line.
+    _run_stage(
+        "pin_tf_metadata_protobuf",
+        [
+            "uv",
+            "pip",
+            "install",
+            "--python",
+            str(python_bin),
+            f"tensorflow-metadata=={TF_METADATA_VERSION}",
+            f"protobuf=={PROTOBUF_VERSION}",
+        ],
+        status_path=status_path,
+        setup_log=setup_log,
+    )
+
     check = _run_stage(
         "verify_openvla_env",
         [
             str(python_bin),
             "-c",
-            "import sys,torch; print(sys.version.split()[0]); print(torch.__version__); import flash_attn; print('flash_attn_ok')",
+            (
+                "import importlib.metadata as im,sys,torch; "
+                "print(sys.version.split()[0]); print(torch.__version__); "
+                "import flash_attn; print('flash_attn_ok'); "
+                "import tensorflow_datasets as tfds; import tensorflow_metadata; import dlimp; "
+                "print('tensorflow-datasets=' + im.version('tensorflow-datasets')); "
+                "print('tensorflow-metadata=' + im.version('tensorflow-metadata')); "
+                "print('protobuf=' + im.version('protobuf')); print('tfds_dlimp_ok')"
+            ),
         ],
         status_path=status_path,
         setup_log=setup_log,
     ).strip().splitlines()
-    if not check or not check[-3].startswith("3.10"):
+    if not any(line.startswith("3.10") for line in check):
         raise RuntimeError(f"OpenVLA-OFT probe must use Python 3.10: {check}")
+    if f"tensorflow-metadata={TF_METADATA_VERSION}" not in check:
+        raise RuntimeError(f"tensorflow-metadata pin mismatch: {check}")
+    if f"protobuf={PROTOBUF_VERSION}" not in check:
+        raise RuntimeError(f"protobuf pin mismatch: {check}")
+    if "tfds_dlimp_ok" not in check:
+        raise RuntimeError(f"TFDS/dlimp import verification failed: {check}")
     return venv
 
 
