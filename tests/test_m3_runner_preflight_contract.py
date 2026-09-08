@@ -53,6 +53,18 @@ def test_preflight_validator_cannot_start_training():
     assert "vla-scripts/finetune.py" not in source
 
 
+def test_source_checkout_preflight_only_fetches_and_validates_entries():
+    source = (ROOT / "tools/colab/run_m3_runner_preflight.py").read_text(encoding="utf-8")
+    assert SMOL_REF in source and OPENVLA_REF in source
+    assert "src/lerobot/scripts/lerobot_train.py" in source
+    assert "vla-scripts/finetune.py" in source
+    assert "READY_FOR_BATCH_PROBE" in source
+    assert "Training started: False" in source
+    assert "subprocess.Popen" not in source
+    assert "lerobot-train" not in source
+    assert "accelerate launch" not in source
+
+
 def test_openvla_training_adapter_adds_only_expected_window_dimension():
     sys.path.insert(0, str(ROOT / "tools/data"))
     try:
