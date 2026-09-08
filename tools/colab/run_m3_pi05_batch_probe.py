@@ -93,14 +93,14 @@ def main() -> int:
             "WANDB_DISABLED": "true",
         }
         outer_log = log_root / f"{run_name}.outer.log"
-        rc, text, elapsed = run_logged(
+        rc, text, elapsed, sampled_peak = run_logged(
             ["bash", "-lc", f"source env_train.sh && bash {launcher}"],
             cwd=pi05_dir,
             env=env,
             log_path=outer_log,
         )
         summary_path = out_root / run_name / "cheap_ablation_summary.json"
-        peak = 0
+        peak = sampled_peak
         loss = None
         if rc == 0 and summary_path.is_file():
             summary = json.loads(summary_path.read_text(encoding="utf-8"))
@@ -110,7 +110,7 @@ def main() -> int:
                 raise RuntimeError(f"pi05 probe optimizer step mismatch: {summary}")
             if int(summary.get("effective_batch", -1)) != TARGET_EFFECTIVE_BATCH:
                 raise RuntimeError(f"pi05 probe effective batch mismatch: {summary}")
-            peak = int(summary.get("peak_vram_mib", 0) or 0)
+            peak = max(peak, int(summary.get("peak_vram_mib", 0) or 0))
             loss = summary.get("final_logged_loss_best_effort")
         trial = candidate_result(
             micro_batch=micro_batch,
