@@ -5,7 +5,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 NOTEBOOK = ROOT / "colab/69c_openvla_streaming_bridge_validation.ipynb"
-FIXED_PIN = "734f8c4077deb4ca4b09c30b34303445b5cc1edb"
+FIXED_PIN = "4c4a7e849b113c50a30d21885865b1bd939098a4"
 
 
 def _sources():
