@@ -33,9 +33,24 @@ def test_promise_is_only_source_build_exception(tmp_path):
     install, label = calls[1]
     assert label == "rlds-conversion-deps"
     assert install[install.index("--only-binary") + 1] == ":all:"
+    assert "tensorflow-cpu==2.17.1" in install
     assert "tensorflow-datasets==4.9.6" in install
+    assert "tensorflow-metadata==1.16.1" in install
+    assert "googleapis-common-protos==1.65.0" in install
+    assert "protobuf==3.20.3" in install
     assert "av==12.3.0" in install
     assert "promise==2.3" not in install
+
+
+def test_environment_check_uses_distribution_versions_and_rlds_import():
+    check = module.CHECK
+    assert "from tensorflow_datasets import rlds" in check
+    assert "tfds.__version__" not in check
+    assert "md.version('tensorflow-datasets') == '4.9.6'" in check
+    assert "md.version('tensorflow-metadata') == '1.16.1'" in check
+    assert "md.version('googleapis-common-protos') == '1.65.0'" in check
+    assert "md.version('protobuf') == '3.20.3'" in check
+    assert "md.version('promise') == '2.3'" in check
 
 
 def test_dependency_failure_stops_before_conversion(tmp_path):
