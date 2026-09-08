@@ -139,7 +139,9 @@ def main() -> int:
     report69b = _read_json(args.report69b)
     capacity69b = _read_json(args.capacity69b)
     _validate_69b(report69b, capacity69b, manifest)
+    print("[1/3] 69b provenance + streaming capacity decision PASS", flush=True)
 
+    print("[2/3] scanning exact 10,758-episode selected pool for OpenVLA statistics...", flush=True)
     actions, proprios, row_count, episode_ids, task_ids = _scan_selected_pool(
         args.lerobot_root, manifest
     )
@@ -148,6 +150,7 @@ def main() -> int:
         raise RuntimeError(f"selected-pool rows={row_count} expected={expected_frames}")
     if episode_ids != set(manifest["episode_ids"]):
         raise RuntimeError("selected-pool episode identity mismatch")
+    print(f"[2/3] selected pool PASS episodes={len(episode_ids)} frames={row_count}", flush=True)
 
     # Validate the exact 69b reference sample through the direct streaming path.
     sample_ids = list(report69b["converted_episode_ids"])
@@ -169,9 +172,11 @@ def main() -> int:
 
     from openvla_lerobot_streaming import iter_openvla_windows
 
+    print("[3/3] validating 69b reference episodes through direct streaming...", flush=True)
     for traj in iter_selected_trajectories(
         args.lerobot_root, manifest, max_episodes=8
     ):
+        print(f"[stream] episode={traj.episode_id} frames={len(traj.action)}", flush=True)
         if traj.episode_id not in sample_ids:
             raise RuntimeError(f"unexpected sample episode {traj.episode_id}")
         sample_frames += len(traj.action)
