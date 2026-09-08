@@ -38,6 +38,13 @@ def main() -> int:
     )
     if not (dataset_root / "meta/info.json").is_file():
         raise FileNotFoundError(dataset_root / "meta/info.json")
+    stats_path = dataset_root / "meta/stats.json"
+    if not stats_path.is_file():
+        raise FileNotFoundError(stats_path)
+    stats = json.loads(stats_path.read_text(encoding="utf-8"))
+    for feature in ("observation.state", "action"):
+        if "q01" not in stats.get(feature, {}) or "q99" not in stats.get(feature, {}):
+            raise RuntimeError(f"pi0.5 M3 source dataset is missing frozen q01/q99 stats: {feature}")
     if not os.environ.get("HF_TOKEN"):
         raise RuntimeError("HF_TOKEN is required for pi0.5 probe")
 
@@ -52,7 +59,7 @@ def main() -> int:
     data_root = root / "cache/m3-pi05-batch-probe"
     lerobot_root = root / "vendor/lerobot-pi05-m3-probe"
     out_root = data_root / "outputs"
-    log_root = data_root / "logs"
+    log_root = drive / "model-benchmark-v1/batch-probes/logs/pi05"
     setup_env = os.environ.copy()
     setup_env.update(
         {
