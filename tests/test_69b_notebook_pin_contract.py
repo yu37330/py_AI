@@ -1,4 +1,4 @@
-"""69b Notebookが修正済みrunnerを固定参照することを検証する。"""
+"""69b Notebookが修正済みrunnerを固定参照し、失敗時に診断を表示することを検証する。"""
 import json
 from pathlib import Path
 
@@ -12,20 +12,33 @@ OLD_PINS = {
 }
 
 
-def test_69b_notebook_uses_uv_compatible_dependency_fix():
+def code_source():
     data = json.loads(NOTEBOOK.read_text(encoding="utf-8"))
-    source = "\n".join(
+    return "\n".join(
         line
         for cell in data["cells"]
         if cell.get("cell_type") == "code"
         for line in cell.get("source", [])
     )
 
+
+def test_69b_notebook_uses_uv_compatible_dependency_fix():
+    source = code_source()
     assert FIXED_PIN in source
     for old_pin in OLD_PINS:
         assert old_pin not in source
     assert "tools/colab/rlds_smoke_recovery.py" in source
     assert "subprocess.run(cmd, check=True)" in source
+
+
+def test_69b_notebook_surfaces_child_failure_diagnostics():
+    source = code_source()
+    assert "except subprocess.CalledProcessError" in source
+    assert "bridge_smoke_status.json" in source
+    assert "Full log: " in source
+    assert "=== 69b DIAGNOSTICS ===" in source
+    assert "=== 69b ERROR LOG ===" in source
+    assert "lines[-200:]" in source
 
 
 def test_69b_notebook_documents_promise_exception():
@@ -40,3 +53,4 @@ def test_69b_notebook_documents_promise_exception():
     assert "promise==2.3" in markdown
     assert "binary wheel" in markdown
     assert "--no-binary promise" in markdown
+    assert "bridge_smoke_status.json" in markdown
