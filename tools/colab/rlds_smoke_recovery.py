@@ -21,9 +21,32 @@ from pathlib import Path
 VARIANT = "V2_SQRT_BALANCED_RAW"
 REVISION = "f3f49f426d75030177b18778374005bc12ccd588"
 DATASET_ID = "lerobot/libero_plus"
-WHEEL_DEPS = ["numpy<2", "pandas>=2,<3", "pyarrow>=16", "tensorflow-cpu==2.17.1", "tensorflow-datasets==4.9.6", "av==12.3.0"]
+WHEEL_DEPS = [
+    "numpy<2",
+    "pandas>=2,<3",
+    "pyarrow>=16",
+    "tensorflow-cpu==2.17.1",
+    "tensorflow-datasets==4.9.6",
+    "tensorflow-metadata==1.16.1",
+    "googleapis-common-protos==1.65.0",
+    "protobuf==3.20.3",
+    "av==12.3.0",
+]
 PROMISE = "promise==2.3"
-CHECK = "import sys, importlib.metadata as md, numpy, pandas, pyarrow, tensorflow as tf, tensorflow_datasets as tfds, av; assert sys.version_info[:2] == (3,10); assert tf.__version__ == '2.17.1'; assert tfds.__version__ == '4.9.6'; assert av.__version__ == '12.3.0'; assert md.version('promise') == '2.3'; print('conversion dependencies verified', flush=True)"
+CHECK = (
+    "import sys, importlib.metadata as md, numpy, pandas, pyarrow, tensorflow as tf, "
+    "tensorflow_datasets as tfds, av; "
+    "from tensorflow_datasets import rlds; "
+    "assert sys.version_info[:2] == (3,10); "
+    "assert tf.__version__ == '2.17.1'; "
+    "assert md.version('tensorflow-datasets') == '4.9.6'; "
+    "assert md.version('tensorflow-metadata') == '1.16.1'; "
+    "assert md.version('googleapis-common-protos') == '1.65.0'; "
+    "assert md.version('protobuf') == '3.20.3'; "
+    "assert av.__version__ == '12.3.0'; "
+    "assert md.version('promise') == '2.3'; "
+    "print('conversion dependencies verified', flush=True)"
+)
 
 
 def read_json(path):
@@ -140,8 +163,7 @@ def install_conversion_deps(uv, py, log_dir, *, exec_command=run_logged):
     exec_command([uv, "pip", "install", "--python", str(py),
                   "--no-deps", "--no-binary", "promise", PROMISE],
                  "rlds-promise-build", log_dir)
-    # Do not request promise again under --only-binary :all:, or uv may try to
-    # resolve the sdist-only package under the wheel-only policy.
+    # Keep the rest of the compatibility stack wheel-only and explicitly pinned.
     exec_command([uv, "pip", "install", "--python", str(py),
                   "--only-binary", ":all:", *WHEEL_DEPS],
                  "rlds-conversion-deps", log_dir)
