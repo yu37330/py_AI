@@ -89,7 +89,7 @@ def main() -> int:
         raise RuntimeError(f"SmolVLA probe must use Python 3.12: {version}")
 
     cache = root / "cache/m3-smolvla-batch-probe"
-    log_root = cache / "logs"
+    log_root = drive / "model-benchmark-v1/batch-probes/logs/smolvla"
     out_root = cache / "outputs"
     candidates = [32, 16, 8, 4, 2, 1]
     trials = []
@@ -128,11 +128,12 @@ def main() -> int:
             "PYTHONUNBUFFERED": "1",
             "TOKENIZERS_PARALLELISM": "false",
         }
+        log_path = log_root / f"{run_name}.log"
         rc, text, elapsed, peak = run_logged(
             cmd,
             cwd=source,
             env=env,
-            log_path=log_root / f"{run_name}.log",
+            log_path=log_path,
         )
         trial = candidate_result(
             micro_batch=micro_batch,
@@ -149,9 +150,7 @@ def main() -> int:
             selected = trial
             break
         if trial["status"] != "OOM":
-            raise RuntimeError(
-                f"SmolVLA probe failed for non-OOM reason: {trial}; log={log_root / (run_name + '.log')}"
-            )
+            raise RuntimeError(f"SmolVLA probe failed for non-OOM reason: {trial}; log={log_path}")
 
     result_path = drive / "model-benchmark-v1/batch-probes/smolvla.json"
     if selected is None:
