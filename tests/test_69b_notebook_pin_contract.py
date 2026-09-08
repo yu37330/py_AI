@@ -5,8 +5,9 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 NOTEBOOK = ROOT / "colab/69b_openvla_selected_rlds_smoke.ipynb"
-FIXED_PIN = "b1e6b70d9ee2fcc2941adbcb7a3771edf9f0fda0"
+FIXED_PIN = "0148430a26b5a9d862b3fe8f37733d1f7fca7af4"
 OLD_PINS = {
+    "b1e6b70d9ee2fcc2941adbcb7a3771edf9f0fda0",
     "73bab2a1d87dd1b2ab80b2e053210a57f731d6f6",
     "5f7cbb4ed4b054b381a3a0074ab54b419b09a5de",
 }
@@ -22,7 +23,7 @@ def code_source():
     )
 
 
-def test_69b_notebook_uses_uv_compatible_dependency_fix():
+def test_69b_notebook_uses_protobuf_compatible_dependency_fix():
     source = code_source()
     assert FIXED_PIN in source
     for old_pin in OLD_PINS:
@@ -41,7 +42,7 @@ def test_69b_notebook_surfaces_child_failure_diagnostics():
     assert "lines[-200:]" in source
 
 
-def test_69b_notebook_documents_promise_exception():
+def test_69b_notebook_documents_dependency_exceptions():
     data = json.loads(NOTEBOOK.read_text(encoding="utf-8"))
     markdown = "\n".join(
         line
@@ -53,4 +54,7 @@ def test_69b_notebook_documents_promise_exception():
     assert "promise==2.3" in markdown
     assert "binary wheel" in markdown
     assert "--no-binary promise" in markdown
+    assert "tensorflow-metadata==1.16.1" in markdown
+    assert "protobuf==3.20.3" in markdown
+    assert "googleapis-common-protos==1.65.0" in markdown
     assert "bridge_smoke_status.json" in markdown
