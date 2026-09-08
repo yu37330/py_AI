@@ -1,5 +1,6 @@
 """69c OpenVLA streaming semantics regression tests (no dataset/network required)."""
 import importlib.util
+import sys
 from pathlib import Path
 
 import numpy as np
@@ -11,6 +12,7 @@ SPEC = importlib.util.spec_from_file_location(
     ROOT / "tools/data/openvla_lerobot_streaming.py",
 )
 module = importlib.util.module_from_spec(SPEC)
+sys.modules[SPEC.name] = module
 SPEC.loader.exec_module(module)
 
 
