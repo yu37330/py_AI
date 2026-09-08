@@ -5,11 +5,14 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 NOTEBOOK = ROOT / "colab/69b_openvla_selected_rlds_smoke.ipynb"
-FIXED_PIN = "73bab2a1d87dd1b2ab80b2e053210a57f731d6f6"
-OLD_PIN = "5f7cbb4ed4b054b381a3a0074ab54b419b09a5de"
+FIXED_PIN = "b1e6b70d9ee2fcc2941adbcb7a3771edf9f0fda0"
+OLD_PINS = {
+    "73bab2a1d87dd1b2ab80b2e053210a57f731d6f6",
+    "5f7cbb4ed4b054b381a3a0074ab54b419b09a5de",
+}
 
 
-def test_69b_notebook_uses_merged_dependency_fix():
+def test_69b_notebook_uses_uv_compatible_dependency_fix():
     data = json.loads(NOTEBOOK.read_text(encoding="utf-8"))
     source = "\n".join(
         line
@@ -19,7 +22,8 @@ def test_69b_notebook_uses_merged_dependency_fix():
     )
 
     assert FIXED_PIN in source
-    assert OLD_PIN not in source
+    for old_pin in OLD_PINS:
+        assert old_pin not in source
     assert "tools/colab/rlds_smoke_recovery.py" in source
     assert "subprocess.run(cmd, check=True)" in source
 
@@ -35,3 +39,4 @@ def test_69b_notebook_documents_promise_exception():
 
     assert "promise==2.3" in markdown
     assert "binary wheel" in markdown
+    assert "--no-binary promise" in markdown

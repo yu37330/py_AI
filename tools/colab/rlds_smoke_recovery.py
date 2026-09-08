@@ -21,7 +21,7 @@ from pathlib import Path
 VARIANT = "V2_SQRT_BALANCED_RAW"
 REVISION = "f3f49f426d75030177b18778374005bc12ccd588"
 DATASET_ID = "lerobot/libero_plus"
-DEPS = ["numpy<2", "pandas>=2,<3", "pyarrow>=16", "tensorflow-cpu==2.17.1", "tensorflow-datasets==4.9.6", "av==12.3.0", "promise==2.3"]
+WHEEL_DEPS = ["numpy<2", "pandas>=2,<3", "pyarrow>=16", "tensorflow-cpu==2.17.1", "tensorflow-datasets==4.9.6", "av==12.3.0"]
 PROMISE = "promise==2.3"
 CHECK = "import sys, importlib.metadata as md, numpy, pandas, pyarrow, tensorflow as tf, tensorflow_datasets as tfds, av; assert sys.version_info[:2] == (3,10); assert tf.__version__ == '2.17.1'; assert tfds.__version__ == '4.9.6'; assert av.__version__ == '12.3.0'; assert md.version('promise') == '2.3'; print('conversion dependencies verified', flush=True)"
 
@@ -134,14 +134,16 @@ def run_logged(cmd, label, log_dir, *, env=None, cwd=None, interval=30):
 
 
 def install_conversion_deps(uv, py, log_dir, *, exec_command=run_logged):
-    """Build only the pinned promise exception, then require wheels for all deps."""
-    # promise 2.3 is sdist-only. Install it without runtime dependencies first.
-    # All remaining packages, including PyAV, retain the wheel-only contract.
+    """Build only the pinned promise exception, then require wheels for all other deps."""
+    # promise 2.3 is sdist-only. Use the broadly supported --no-binary form so
+    # older uv versions in Colab can build only promise without its dependencies.
     exec_command([uv, "pip", "install", "--python", str(py),
-                  "--no-deps", "--no-binary-package", "promise", PROMISE],
+                  "--no-deps", "--no-binary", "promise", PROMISE],
                  "rlds-promise-build", log_dir)
+    # Do not request promise again under --only-binary :all:, or uv may try to
+    # resolve the sdist-only package under the wheel-only policy.
     exec_command([uv, "pip", "install", "--python", str(py),
-                  "--only-binary", ":all:", *DEPS],
+                  "--only-binary", ":all:", *WHEEL_DEPS],
                  "rlds-conversion-deps", log_dir)
 
 
