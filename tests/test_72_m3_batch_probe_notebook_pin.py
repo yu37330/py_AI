@@ -5,12 +5,13 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 BASE_PROBE_PIN = "2b961ef03619fea21f36dc902fb8b7b02f793120"
+SMOLVLA_LIBERO_PIN = "5c334095e327c56173e06eed4c5f19fae3fc7878"
 OPENVLA_DIAG_PIN = "ac9a5c403784bbc7624c9055ed6282b27f16b3a3"
 OLD_PIN = "5baa5e3297ae476fe6f462ebcaac6d988f1a8e43"
 
 NOTEBOOKS = {
     "72a_m3_pi05_batch_probe.ipynb": ("run_m3_pi05_batch_probe.py", BASE_PROBE_PIN),
-    "72b_m3_smolvla_batch_probe.ipynb": ("run_m3_smolvla_batch_probe.py", BASE_PROBE_PIN),
+    "72b_m3_smolvla_batch_probe.ipynb": ("run_m3_smolvla_batch_probe.py", SMOLVLA_LIBERO_PIN),
     "72c_m3_openvla_oft_batch_probe.ipynb": ("run_m3_openvla_batch_probe.py", OPENVLA_DIAG_PIN),
     "72d_m3_batch_probe_controller.ipynb": ("validate_m3_batch_probes.py", BASE_PROBE_PIN),
 }
@@ -52,6 +53,16 @@ def test_72a_to_72c_are_probe_only_and_not_benchmark_runs():
         assert "probe-only" in markdown
         assert "4800" not in source
         assert "1800" not in source
+
+
+def test_72b_surfaces_persisted_result_and_probe_log_diagnostics():
+    _, source, markdown = _read_notebook("72b_m3_smolvla_batch_probe.ipynb")
+    assert SMOLVLA_LIBERO_PIN in source
+    assert "smolvla.json" in source
+    assert "logs/smolvla" in source
+    assert "=== 72b DIAGNOSTICS ===" in source
+    assert "lines[-250:]" in source
+    assert "input_features/output_features=null" in markdown
 
 
 def test_72c_surfaces_persisted_setup_and_probe_diagnostics():
