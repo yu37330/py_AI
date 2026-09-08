@@ -1,0 +1,75 @@
+{
+  "schema_version": 1,
+  "stage": "M3_A100_batch_probe",
+  "status": "FROZEN",
+  "probe_only": true,
+  "benchmark_training_started": false,
+  "selected_dataset_variant": "V2_SQRT_BALANCED_RAW",
+  "selected_episode_ids_sha256": "73ed0d3b0c5e73c745c0aa2e81517ce1fa40240c75f9eb040d65b6876ba08239",
+  "hardware": {
+    "required_gpu_family": "NVIDIA A100",
+    "minimum_vram_mib": 38000
+  },
+  "optimization": {
+    "target_effective_batch_size": 32,
+    "one_optimizer_step_per_trial": true,
+    "candidate_micro_batches": {
+      "pi05": [16, 8, 4, 2, 1],
+      "smolvla": [32, 16, 8, 4, 2, 1],
+      "openvla_oft": [8, 4, 2, 1]
+    },
+    "gradient_accumulation_rule": "target_effective_batch_size / micro_batch_size",
+    "selection_rule": "largest candidate micro batch that completes one optimizer step without OOM",
+    "checkpoint_promotion": false,
+    "wandb_required": false
+  },
+  "model_contracts": {
+    "pi05": {
+      "source_ref": "v0.4.4",
+      "base_checkpoint": "lerobot/pi05_libero_base",
+      "lora_r": 16,
+      "learning_rate": 5e-5
+    },
+    "smolvla": {
+      "source_ref": "3f2c29ef7e44b1ddccbcda3b6a63939e53639e9e",
+      "base_checkpoint": "lerobot/smolvla_base",
+      "python": "3.12",
+      "learning_rate": 1e-4
+    },
+    "openvla_oft": {
+      "source_ref": "e4287e94541f459edc4feabc4e181f537cd569a8",
+      "base_checkpoint": "openvla/openvla-7b",
+      "python": "3.10",
+      "learning_rate": 5e-4,
+      "lora_r": 32,
+      "use_l1_regression": true,
+      "use_diffusion": false,
+      "use_film": false,
+      "num_images_in_input": 2,
+      "use_proprio": true,
+      "image_aug": true,
+      "dataset_bridge": "lerobot_streaming"
+    }
+  },
+  "required_result_fields": [
+    "status",
+    "model",
+    "gpu_name",
+    "gpu_vram_mib",
+    "selected_micro_batch",
+    "gradient_accumulation",
+    "effective_batch_size",
+    "peak_vram_mib",
+    "loss",
+    "source_ref",
+    "selected_episode_ids_sha256",
+    "probe_only",
+    "benchmark_training_started"
+  ],
+  "promotion_gate": {
+    "required_models": ["pi05", "smolvla", "openvla_oft"],
+    "all_must_pass": true,
+    "next_status": "READY_FOR_M3_RUNNER_IMPLEMENTATION",
+    "does_not_start_training": true
+  }
+}

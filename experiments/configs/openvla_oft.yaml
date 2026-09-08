@@ -12,9 +12,15 @@ training:
   lora_dropout: 0.0
   learning_rate: 5.0e-4
   use_l1_regression: true
+  use_diffusion: false
+  use_film: false
+  num_images_in_input: 2
+  use_proprio: true
+  image_aug: true
   upstream_default_batch_size: 8
   benchmark_batch_size: PROBE_ON_A100
   gradient_accumulation: PROBE_ON_A100
+  target_effective_batch_size: 32
   stop_controller: experiments/plans/model_benchmark_runner_v1.json
   seed: 1000
 comparison:
@@ -28,6 +34,7 @@ comparison:
   keep_equal_data_and_equal_wall_time_separate: true
 notes:
   - Frozen source revision and base checkpoint match experiments/model_registry_v1.json.
+  - LIBERO recipe fields mirror the pinned upstream OFT recipe: 2 images, proprio, L1 regression, image augmentation, no FiLM/diffusion.
   - Do not substitute upstream modified_libero_rlds; use the validated exact selected-pool streaming bridge.
   - Native finetune max_steps counts gradient steps, so M3 stopping is controlled by actual sample visits and train-loop wall time in the wrapper.
   - A training-facing iterable wrapper must add the leading window dimension expected by RLDSBatchTransform.
