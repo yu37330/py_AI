@@ -41,5 +41,8 @@ def test_notebook70_accepts_full_or_validated_streaming_bridge():
 
 def test_notebook70_remains_controller_only():
     source = code_source()
-    assert "vla-scripts/finetune.py" not in source
+    # The upstream finetune.py path is checked for existence, but never launched.
+    assert "torchrun" not in source
+    assert "accelerate launch" not in source
+    assert "--max_steps" not in source
     assert "Controller gate passed. Do not infer that training ran" in source
