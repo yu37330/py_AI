@@ -38,6 +38,21 @@ def test_libero_proprio_is_state_first6_plus_last2():
     assert got.shape == (2, 8)
 
 
+def test_bounds_q99_uses_full_min_max_for_constant_dimension_gate():
+    values = np.array([[1.0, 9.0]], dtype=np.float32)
+    got = module.bounds_q99_normalize(
+        values,
+        q01=np.array([1.0, 0.0], dtype=np.float32),
+        q99=np.array([1.0, 10.0], dtype=np.float32),
+        min_values=np.array([0.0, 9.0], dtype=np.float32),
+        max_values=np.array([2.0, 9.0], dtype=np.float32),
+    )
+    # Dim 0 has q01==q99 but is not truly constant -> do not force to zero.
+    assert got[0, 0] == -1.0
+    # Dim 1 is truly constant by full min/max -> upstream maps it to zero.
+    assert got[0, 1] == 0.0
+
+
 def test_action_chunk_uses_relative_zero_and_absolute_gripper_padding():
     actions = np.array(
         [
