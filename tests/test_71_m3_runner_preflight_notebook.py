@@ -3,10 +3,9 @@ import ast
 import json
 from pathlib import Path
 
-
 ROOT = Path(__file__).resolve().parents[1]
 NOTEBOOK = ROOT / "colab/71_m3_runner_preflight.ipynb"
-FIXED_PIN = "b64e7a2e7ec481e17d3de5a3c2aef5f18f53cfda"
+FIXED_PIN = "fad76da3032a77070ac3d204a48216744ff5a350"
 
 
 def test_notebook71_is_pinned_preflight_only():
