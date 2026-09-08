@@ -7,6 +7,7 @@ import os
 from pathlib import Path
 import re
 import subprocess
+import threading
 import time
 from typing import Any
 
@@ -33,14 +34,13 @@ def gpu_info() -> tuple[str, int]:
     return name, total
 
 
-def peak_vram_mib() -> int:
+def current_gpu_used_mib() -> int:
     try:
-        return int(
-            subprocess.check_output(
-                ["nvidia-smi", "--query-compute-apps=used_memory", "--format=csv,noheader,nounits"],
-                text=True,
-            ).strip().splitlines()[0]
-        )
+        raw = subprocess.check_output(
+            ["nvidia-smi", "--query-gpu=memory.used", "--format=csv,noheader,nounits"],
+            text=True,
+        ).strip().splitlines()[0]
+        return int(raw)
     except Exception:
         return 0
 
@@ -105,7 +105,7 @@ def run_logged(
     cwd: Path | None = None,
     env: dict[str, str] | None = None,
     log_path: Path,
-) -> tuple[int, str, float]:
+) -> tuple[int, str, float, int]:
     log_path.parent.mkdir(parents=True, exist_ok=True)
     child_env = os.environ.copy()
     if env:
@@ -123,16 +123,30 @@ def run_logged(
         bufsize=1,
     )
     assert proc.stdout is not None
+    stop = threading.Event()
+    peak = {"mib": current_gpu_used_mib()}
+
+    def sample_vram() -> None:
+        while not stop.wait(0.5):
+            peak["mib"] = max(peak["mib"], current_gpu_used_mib())
+
+    sampler = threading.Thread(target=sample_vram, daemon=True)
+    sampler.start()
     lines: list[str] = []
-    with log_path.open("w", encoding="utf-8") as fh:
-        for line in proc.stdout:
-            line = line.rstrip("\n")
-            lines.append(line)
-            fh.write(line + "\n")
-            fh.flush()
-            print(line, flush=True)
-    rc = proc.wait()
-    return rc, "\n".join(lines), time.perf_counter() - start
+    try:
+        with log_path.open("w", encoding="utf-8") as fh:
+            for line in proc.stdout:
+                line = line.rstrip("\n")
+                lines.append(line)
+                fh.write(line + "\n")
+                fh.flush()
+                print(line, flush=True)
+        rc = proc.wait()
+    finally:
+        stop.set()
+        sampler.join(timeout=2)
+        peak["mib"] = max(peak["mib"], current_gpu_used_mib())
+    return rc, "\n".join(lines), time.perf_counter() - start, peak["mib"]
 
 
 def write_result(path: Path, result: dict[str, Any]) -> None:
