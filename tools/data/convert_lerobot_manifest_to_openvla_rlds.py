@@ -234,7 +234,7 @@ def _load_episode(
                     "wrist_image": wrist[i],
                     "state": state[i],
                     # Upstream LIBERO RLDS exposes this key, but OpenVLA's selected
-                    # LIBERO config ignores it.  Keep a deterministic padding value.
+                    # LIBERO config ignores it. Keep a deterministic padding value.
                     "joint_state": np.zeros((7,), dtype=np.float32),
                 },
                 "action": action[i],
@@ -252,6 +252,11 @@ def _load_episode(
 class ParcLiberoSelected(tfds.core.GeneratorBasedBuilder):
     VERSION = VERSION
     RELEASE_NOTES = {"1.0.0": "PARC2026 selected LeRobot episode pool bridge."}
+    # TFDS normally infers metadata resources from the builder class module.
+    # This file is executed directly by 69b, where __module__ is "__main__";
+    # set the package directory explicitly so importlib.resources is not asked
+    # to resolve the non-importable __main__ module.
+    pkg_dir_path = Path(__file__).resolve().parent
 
     def __init__(
         self,
