@@ -44,9 +44,6 @@ def ensure_env(root: Path, source: Path) -> Path:
             ["uv", "pip", "install", "--python", str(python_bin), "packaging", "ninja"],
             check=True,
         )
-        # uv-created venvs are not guaranteed to expose pip as a module. FlashAttention's
-        # upstream recipe explicitly needs a traditional pip PEP-517 build with
-        # --no-build-isolation, so seed pip before following that pinned recipe.
         subprocess.run([str(python_bin), "-m", "ensurepip", "--upgrade"], check=True)
         subprocess.run(
             [
@@ -106,7 +103,7 @@ def main() -> int:
     venv = ensure_env(root, source)
     python_bin = venv / "bin/python"
     cache = root / "cache/m3-openvla-batch-probe"
-    log_root = cache / "logs"
+    log_root = drive / "model-benchmark-v1/batch-probes/logs/openvla_oft"
     trial_root = cache / "trials"
     candidates = [8, 4, 2, 1]
     trials = []
@@ -154,11 +151,12 @@ def main() -> int:
             "TOKENIZERS_PARALLELISM": "false",
             "PYTHONUNBUFFERED": "1",
         }
+        log_path = log_root / f"{run_name}.log"
         rc, text, elapsed, sampled_peak = run_logged(
             cmd,
             cwd=source,
             env=env,
-            log_path=log_root / f"{run_name}.log",
+            log_path=log_path,
         )
         inner_result = None
         if rc == 0:
@@ -189,9 +187,7 @@ def main() -> int:
             selected = trial
             break
         if trial["status"] != "OOM":
-            raise RuntimeError(
-                f"OpenVLA-OFT probe failed for non-OOM reason: {trial}; log={log_root / (run_name + '.log')}"
-            )
+            raise RuntimeError(f"OpenVLA-OFT probe failed for non-OOM reason: {trial}; log={log_path}")
 
     result_path = drive / "model-benchmark-v1/batch-probes/openvla_oft.json"
     if selected is None:
