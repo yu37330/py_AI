@@ -1,20 +1,34 @@
-id: openvla_oft_baseline
+id: openvla_oft_m3_candidate
 family: openvla_oft
 framework: openvla_oft
-source_repo: https://github.com/RLinf/openvla-oft.git
-source_ref: TODO_PIN_COMMIT_BEFORE_RUN
-base_checkpoint: TODO_PIN_CHECKPOINT
+source_repo: https://github.com/small-zeng/openvla-oft.git
+source_ref: e4287e94541f459edc4feabc4e181f537cd569a8
+training_entry: vla-scripts/finetune.py
+base_checkpoint: openvla/openvla-7b
 training:
-  method: lora_or_oft
+  method: lora
   dtype: bfloat16
-  batch_size: TODO_PROBE_ON_A100
-  gradient_accumulation: TODO_SET_FOR_COMPARABLE_EFFECTIVE_BATCH
-  learning_rate: TODO_FROM_LIBERO_RECIPE
+  lora_r: 32
+  lora_dropout: 0.0
+  learning_rate: 5.0e-4
+  use_l1_regression: true
+  upstream_default_batch_size: 8
+  benchmark_batch_size: PROBE_ON_A100
+  gradient_accumulation: PROBE_ON_A100
+  stop_controller: experiments/plans/model_benchmark_runner_v1.json
   seed: 1000
-  steps: TODO_EQUAL_DATA_AND_WALLTIME_PROTOCOLS
 comparison:
-  dataset_manifest: experiments/manifests/datasets/libero_common_v1.json
-  eval_split: experiments/manifests/eval_splits/libero_eval_v1.json
+  selected_dataset_variant: V2_SQRT_BALANCED_RAW
+  selected_episode_ids_sha256: 73ed0d3b0c5e73c745c0aa2e81517ce1fa40240c75f9eb040d65b6876ba08239
+  dataset_bridge: lerobot_streaming
+  streaming_contract: /content/drive/MyDrive/parc2026-cache/openvla-streaming-selected-v1/streaming_bridge_contract.json
+  full_rlds_materialization: false
+  sample_budget: 4800
+  train_loop_sec: 1800
+  keep_equal_data_and_equal_wall_time_separate: true
 notes:
-  - Pin the exact upstream commit before recording benchmark results.
-  - Verify output action convention and normalization against the PARC pipeline before promotion.
+  - Frozen source revision and base checkpoint match experiments/model_registry_v1.json.
+  - Do not substitute upstream modified_libero_rlds; use the validated exact selected-pool streaming bridge.
+  - Native finetune max_steps counts gradient steps, so M3 stopping is controlled by actual sample visits and train-loop wall time in the wrapper.
+  - A training-facing iterable wrapper must add the leading window dimension expected by RLDSBatchTransform.
+  - Benchmark execution remains blocked until the A100 batch/forward-backward smoke passes.
