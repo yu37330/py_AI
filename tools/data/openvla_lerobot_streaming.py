@@ -118,15 +118,23 @@ def bounds_q99_normalize(
     values: np.ndarray,
     q01: np.ndarray,
     q99: np.ndarray,
+    min_values: np.ndarray,
+    max_values: np.ndarray,
     *,
     mask: np.ndarray | None = None,
 ) -> np.ndarray:
-    """OpenVLA BOUNDS_Q99 normalization, with optional per-dimension mask."""
+    """Match OpenVLA BOUNDS_Q99 normalization exactly.
+
+    q01/q99 define the affine bounds, while upstream OpenVLA-OFT detects truly
+    unused/constant dimensions from the full min/max statistics.
+    """
     x = np.asarray(values, dtype=np.float32)
     low = np.asarray(q01, dtype=np.float32)
     high = np.asarray(q99, dtype=np.float32)
+    minimum = np.asarray(min_values, dtype=np.float32)
+    maximum = np.asarray(max_values, dtype=np.float32)
     scaled = np.clip(2.0 * (x - low) / (high - low + 1e-8) - 1.0, -1.0, 1.0)
-    scaled = np.where(low == high, 0.0, scaled)
+    scaled = np.where(minimum == maximum, 0.0, scaled)
     if mask is None:
         return scaled.astype(np.float32, copy=False)
     mask = np.asarray(mask, dtype=bool)
@@ -341,12 +349,16 @@ def iter_openvla_windows(
         trajectory.action,
         np.asarray(action_stats["q01"]),
         np.asarray(action_stats["q99"]),
+        np.asarray(action_stats["min"]),
+        np.asarray(action_stats["max"]),
         mask=np.asarray(ACTION_NORMALIZATION_MASK),
     )
     proprio_norm = bounds_q99_normalize(
         trajectory.proprio,
         np.asarray(proprio_stats["q01"]),
         np.asarray(proprio_stats["q99"]),
+        np.asarray(proprio_stats["min"]),
+        np.asarray(proprio_stats["max"]),
     )
     for i in range(len(trajectory.action)):
         yield {
