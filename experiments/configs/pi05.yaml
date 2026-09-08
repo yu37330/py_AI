@@ -1,4 +1,4 @@
-id: pi05_lora_r16
+id: pi05_m3_candidate
 family: pi05
 framework: lerobot
 source_repo: https://github.com/huggingface/lerobot.git
@@ -8,17 +8,21 @@ training:
   method: lora
   lora_r: 16
   dtype: bfloat16
-  batch_size: 16
-  gradient_accumulation: 8
-  effective_batch_size: 128
   learning_rate: 5.0e-5
-  seed: 1000
-  steps: 20000
   num_inference_steps: 10
   n_action_steps: 10
+  benchmark_batch_size: PROBE_ON_A100
+  gradient_accumulation: PROBE_ON_A100
+  stop_controller: experiments/plans/model_benchmark_runner_v1.json
+  seed: 1000
 comparison:
-  dataset_manifest: experiments/manifests/datasets/libero_common_v1.json
-  eval_split: experiments/manifests/eval_splits/libero_eval_v1.json
+  selected_dataset_variant: V2_SQRT_BALANCED_RAW
+  selected_episode_ids_sha256: 73ed0d3b0c5e73c745c0aa2e81517ce1fa40240c75f9eb040d65b6876ba08239
+  sample_budget: 4800
+  train_loop_sec: 1800
+  keep_equal_data_and_equal_wall_time_separate: true
 notes:
-  - Organizer GPU smoke/merge path verified on 2026-08-29.
-  - GA=8 semantics must be independently verified before the 20k organizer run.
+  - Source/checkpoint/LoRA settings match the frozen registry and verified pi0.5 path.
+  - Use only the fixed group-aware D10 manifest; M3 must not regenerate or reselect the dataset.
+  - The 20k organizer run remains owned by run_pi05_full_train_manifest.py and full_pi05_lora_manifest.sh; it is not this M3 screening config.
+  - Benchmark execution remains blocked until the A100 batch/forward-backward smoke passes.
