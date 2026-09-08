@@ -1,0 +1,81 @@
+{
+  "schema_version": 1,
+  "stage": "M3_runner_bringup",
+  "status": "FROZEN_PREFLIGHT",
+  "purpose": "Freeze executable source identities and stopping semantics before any three-model M3 training is launched.",
+  "selected_dataset": {
+    "variant": "V2_SQRT_BALANCED_RAW",
+    "repo_id": "lerobot/libero_plus",
+    "revision": "f3f49f426d75030177b18778374005bc12ccd588",
+    "episode_count": 10758,
+    "frame_count": 1620614,
+    "episode_ids_sha256": "73ed0d3b0c5e73c745c0aa2e81517ce1fa40240c75f9eb040d65b6876ba08239"
+  },
+  "required_controller_status": "READY_FOR_RUNNER",
+  "tracks": {
+    "equal_data_exposure": {
+      "sample_budget": 4800,
+      "stop_semantics": "Count actual training examples consumed, independent of gradient accumulation. The selected micro-batch and data-parallel world size must divide 4800 exactly so the run has zero sample overshoot.",
+      "same_episode_pool": true,
+      "same_sampling_policy": true
+    },
+    "equal_wall_time": {
+      "train_loop_sec": 1800,
+      "stop_semantics": "Start the timer immediately before the first training-loop batch fetch and stop at the first safe optimizer boundary at or after 1800 seconds. Record measured seconds and consumed samples. Setup, source/model download, dataset staging/conversion, checkpoint merge, and simulator evaluation are excluded."
+    }
+  },
+  "execution_guard": {
+    "default_mode": "preflight",
+    "preflight_starts_training": false,
+    "smoke_requires_explicit_execute": true,
+    "benchmark_requires_explicit_execute": true,
+    "execute_environment_variable": "PARC_M3_EXECUTE",
+    "execute_environment_value": "1"
+  },
+  "models": {
+    "pi05": {
+      "source_repo": "huggingface/lerobot",
+      "source_ref": "v0.4.4",
+      "base_checkpoint": "lerobot/pi05_libero_base",
+      "dataset_format": "lerobot",
+      "adaptation": "LoRA_r16",
+      "runner_strategy": "manifest_filtered_lerobot_wrapper",
+      "note": "The existing 20k full-train runner is not the M3 runner because it regenerates selection gates and uses a long-run step budget. M3 must read the fixed manifest only."
+    },
+    "smolvla": {
+      "source_repo": "huggingface/lerobot",
+      "source_ref": "3f2c29ef7e44b1ddccbcda3b6a63939e53639e9e",
+      "training_entry": "src/lerobot/scripts/lerobot_train.py",
+      "base_checkpoint": "lerobot/smolvla_base",
+      "dataset_format": "lerobot",
+      "adaptation": "candidate_native_lerobot_training",
+      "upstream_native_preset": {
+        "optimizer_lr": 0.0001,
+        "chunk_size": 50,
+        "n_action_steps": 50,
+        "train_pipeline_default_batch_size": 8
+      },
+      "runner_strategy": "manifest_filtered_native_lerobot_wrapper",
+      "note": "LeRobot steps count micro-batches, not optimizer updates or benchmark samples; M3 stopping is therefore controlled by actual sample visits."
+    },
+    "openvla_oft": {
+      "source_repo": "small-zeng/openvla-oft",
+      "source_ref": "e4287e94541f459edc4feabc4e181f537cd569a8",
+      "training_entry": "vla-scripts/finetune.py",
+      "base_checkpoint": "openvla/openvla-7b",
+      "dataset_format": "validated_lerobot_streaming",
+      "adaptation": "OFT_LoRA_r32_candidate",
+      "upstream_native_preset": {
+        "learning_rate": 0.0005,
+        "lora_rank": 32,
+        "lora_dropout": 0.0,
+        "upstream_default_batch_size": 8,
+        "use_l1_regression": true
+      },
+      "runner_strategy": "validated_streaming_torch_iterable_wrapper",
+      "required_bridge_type": "lerobot_streaming",
+      "note": "Do not materialize the projected 56.6 GiB RLDS copy. A training-facing wrapper must add OpenVLA's leading window dimensions before invoking RLDSBatchTransform."
+    }
+  },
+  "next_gate": "A100 per-model batch/forward-backward smoke after this preflight contract is merged and validated; no M3 benchmark run before that gate passes."
+}
