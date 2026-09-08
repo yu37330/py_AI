@@ -6,7 +6,6 @@ from pathlib import Path
 
 import numpy as np
 
-
 ROOT = Path(__file__).resolve().parents[1]
 EXPECTED_HASH = "73ed0d3b0c5e73c745c0aa2e81517ce1fa40240c75f9eb040d65b6876ba08239"
 SMOL_REF = "3f2c29ef7e44b1ddccbcda3b6a63939e53639e9e"
@@ -30,18 +29,20 @@ def test_runner_plan_freezes_budget_sources_and_execution_guard():
 
 
 def test_candidate_yamls_match_registry_and_have_no_todos():
+    pi05 = (ROOT / "experiments/configs/pi05.yaml").read_text(encoding="utf-8")
     smol = (ROOT / "experiments/configs/smolvla.yaml").read_text(encoding="utf-8")
     openvla = (ROOT / "experiments/configs/openvla_oft.yaml").read_text(encoding="utf-8")
-    assert SMOL_REF in smol
-    assert "optimizer_lr: 1.0e-4" in smol
-    assert "PROBE_ON_A100" in smol
-    assert "TODO_" not in smol
+    assert "source_ref: v0.4.4" in pi05
+    assert "lora_r: 16" in pi05 and "learning_rate: 5.0e-5" in pi05
+    assert "PROBE_ON_A100" in pi05 and "steps: 20000" not in pi05
+    assert EXPECTED_HASH in pi05 and "TODO_" not in pi05
+    assert SMOL_REF in smol and "optimizer_lr: 1.0e-4" in smol
+    assert "PROBE_ON_A100" in smol and EXPECTED_HASH in smol and "TODO_" not in smol
     assert OPENVLA_REF in openvla
     assert "https://github.com/small-zeng/openvla-oft.git" in openvla
-    assert "learning_rate: 5.0e-4" in openvla
-    assert "lora_r: 32" in openvla
+    assert "learning_rate: 5.0e-4" in openvla and "lora_r: 32" in openvla
     assert "dataset_bridge: lerobot_streaming" in openvla
-    assert "TODO_" not in openvla
+    assert EXPECTED_HASH in openvla and "TODO_" not in openvla
 
 
 def test_preflight_validator_cannot_start_training():
@@ -68,19 +69,13 @@ def test_source_checkout_preflight_only_fetches_and_validates_entries():
 def test_openvla_training_adapter_adds_only_expected_window_dimension():
     sys.path.insert(0, str(ROOT / "tools/data"))
     try:
-        spec = importlib.util.spec_from_file_location(
-            "openvla_streaming_training_adapter",
-            ROOT / "tools/data/openvla_streaming_training_adapter.py",
-        )
+        spec = importlib.util.spec_from_file_location("openvla_streaming_training_adapter", ROOT / "tools/data/openvla_streaming_training_adapter.py")
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
     finally:
         sys.path.pop(0)
-
     window = {
-        "dataset_name": "parc_libero_selected_streaming",
-        "episode_id": 12,
-        "timestep": 7,
+        "dataset_name": "parc_libero_selected_streaming", "episode_id": 12, "timestep": 7,
         "observation": {
             "image_primary": np.zeros((256, 256, 3), dtype=np.uint8),
             "image_wrist": np.zeros((256, 256, 3), dtype=np.uint8),
