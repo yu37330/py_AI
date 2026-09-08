@@ -1,20 +1,29 @@
-id: smolvla_baseline
+id: smolvla_m3_candidate
 family: smolvla
 framework: lerobot
 source_repo: https://github.com/huggingface/lerobot.git
-source_ref: v0.4.4
+source_ref: 3f2c29ef7e44b1ddccbcda3b6a63939e53639e9e
+training_entry: src/lerobot/scripts/lerobot_train.py
 base_checkpoint: lerobot/smolvla_base
 training:
-  method: finetune
+  method: candidate_native_lerobot_training
   dtype: bfloat16
-  batch_size: 64
-  gradient_accumulation: 1
-  learning_rate: TODO_TUNE
+  optimizer_lr: 1.0e-4
+  chunk_size: 50
+  n_action_steps: 50
+  upstream_train_pipeline_default_batch_size: 8
+  benchmark_batch_size: PROBE_ON_A100
+  gradient_accumulation: PROBE_ON_A100
+  stop_controller: experiments/plans/model_benchmark_runner_v1.json
   seed: 1000
-  steps: TODO_EQUAL_DATA_AND_WALLTIME_PROTOCOLS
 comparison:
-  dataset_manifest: experiments/manifests/datasets/libero_common_v1.json
-  eval_split: experiments/manifests/eval_splits/libero_eval_v1.json
+  selected_dataset_variant: V2_SQRT_BALANCED_RAW
+  selected_episode_ids_sha256: 73ed0d3b0c5e73c745c0aa2e81517ce1fa40240c75f9eb040d65b6876ba08239
+  sample_budget: 4800
+  train_loop_sec: 1800
+  keep_equal_data_and_equal_wall_time_separate: true
 notes:
-  - Use the same state/action/image schema as the common benchmark.
-  - Keep equal-data and equal-wall-time results separate.
+  - Frozen source revision matches experiments/model_registry_v1.json.
+  - Use DatasetConfig.episodes from the fixed group-aware manifest; do not reselect D10.
+  - Upstream LeRobot steps count micro-batches, so M3 stopping is controlled by actual sample visits and train-loop wall time.
+  - Benchmark execution remains blocked until the A100 batch/forward-backward smoke passes.
