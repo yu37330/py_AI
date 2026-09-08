@@ -83,6 +83,19 @@ def _validate_69b(
         raise ValueError("streaming decision is inconsistent with capacity projection")
 
 
+def _arrow_vector_batch(array, width: int, name: str) -> np.ndarray:
+    """Convert a uniform Arrow list/fixed-size-list column without Pandas objects."""
+    values = array.values.to_numpy(zero_copy_only=False)
+    if values.size != len(array) * width:
+        rows = [np.asarray(x.as_py(), dtype=np.float32).reshape(-1) for x in array]
+        out = np.stack(rows)
+    else:
+        out = np.asarray(values, dtype=np.float32).reshape(len(array), width)
+    if out.shape != (len(array), width):
+        raise ValueError(f"{name}: expected [{len(array)},{width}], got {out.shape}")
+    return out
+
+
 def _scan_selected_pool(
     source_root: Path,
     manifest: dict[str, Any],
@@ -93,30 +106,40 @@ def _scan_selected_pool(
     if not files:
         raise FileNotFoundError(Path(source_root) / "data")
     selected = np.asarray(manifest["episode_ids"], dtype=np.int64)
+    expected_frames = int(manifest["summary"]["frame_count"])
+    actions = np.empty((expected_frames, ACTION_DIM), dtype=np.float32)
+    proprios = np.empty((expected_frames, PROPRIO_DIM), dtype=np.float32)
+    episode_ids: set[int] = set()
+    task_ids: set[int] = set()
+    offset = 0
+
     ds = pads.dataset([str(p) for p in files], format="parquet")
-    table = ds.to_table(
+    scanner = ds.scanner(
         columns=[ACTION_KEY, STATE_KEY, "episode_index", "task_index"],
         filter=pads.field("episode_index").isin(selected.tolist()),
+        batch_size=65536,
     )
-    df = table.to_pandas()
-    if df.empty:
-        raise RuntimeError("selected-pool parquet scan returned no rows")
-
-    raw_actions = np.stack(
-        [np.asarray(x, dtype=np.float32).reshape(-1) for x in df[ACTION_KEY].tolist()]
-    )
-    raw_states = np.stack(
-        [np.asarray(x, dtype=np.float32).reshape(-1) for x in df[STATE_KEY].tolist()]
-    )
-    if raw_actions.shape[1] != ACTION_DIM or raw_states.shape[1] != PROPRIO_DIM:
-        raise ValueError(
-            f"source shape mismatch actions={raw_actions.shape} states={raw_states.shape}"
+    for batch in scanner.to_batches():
+        n = len(batch)
+        if offset + n > expected_frames:
+            raise RuntimeError("selected-pool scan exceeds manifest frame count")
+        raw_actions = _arrow_vector_batch(
+            batch.column(batch.schema.get_field_index(ACTION_KEY)), ACTION_DIM, ACTION_KEY
         )
-    actions = standardize_action(raw_actions)
-    proprios = standardize_proprio(raw_states)
-    episode_ids = set(int(x) for x in df["episode_index"].tolist())
-    task_ids = set(int(x) for x in df["task_index"].tolist())
-    return actions, proprios, len(df), episode_ids, task_ids
+        raw_states = _arrow_vector_batch(
+            batch.column(batch.schema.get_field_index(STATE_KEY)), PROPRIO_DIM, STATE_KEY
+        )
+        actions[offset : offset + n] = standardize_action(raw_actions)
+        proprios[offset : offset + n] = standardize_proprio(raw_states)
+        episode_col = batch.column(batch.schema.get_field_index("episode_index"))
+        task_col = batch.column(batch.schema.get_field_index("task_index"))
+        episode_ids.update(int(x) for x in episode_col.to_numpy(zero_copy_only=False))
+        task_ids.update(int(x) for x in task_col.to_numpy(zero_copy_only=False))
+        offset += n
+
+    if offset == 0:
+        raise RuntimeError("selected-pool parquet scan returned no rows")
+    return actions[:offset], proprios[:offset], offset, episode_ids, task_ids
 
 
 def _parse_args() -> argparse.Namespace:
@@ -152,7 +175,6 @@ def main() -> int:
         raise RuntimeError("selected-pool episode identity mismatch")
     print(f"[2/3] selected pool PASS episodes={len(episode_ids)} frames={row_count}", flush=True)
 
-    # Validate the exact 69b reference sample through the direct streaming path.
     sample_ids = list(report69b["converted_episode_ids"])
     if sample_ids != manifest["episode_ids"][:8]:
         raise RuntimeError("69b sample IDs do not match first 8 selected episodes")
