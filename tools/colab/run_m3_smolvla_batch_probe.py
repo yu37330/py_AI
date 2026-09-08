@@ -91,6 +91,7 @@ def main() -> int:
     cache = root / "cache/m3-smolvla-batch-probe"
     log_root = drive / "model-benchmark-v1/batch-probes/logs/smolvla"
     out_root = cache / "outputs"
+    result_path = drive / "model-benchmark-v1/batch-probes/smolvla.json"
     candidates = [32, 16, 8, 4, 2, 1]
     trials = []
     selected = None
@@ -104,6 +105,12 @@ def main() -> int:
             "--policy.path=lerobot/smolvla_base",
             "--policy.device=cuda",
             "--policy.push_to_hub=false",
+            # The base SmolVLA checkpoint was trained with an ALOHA feature schema
+            # (camera1/2/3, state6, action6). For LIBERO fine-tuning, keep the
+            # pretrained weights but infer the concrete input/output feature schema
+            # from the selected LIBERO dataset (front/wrist, state8, action7).
+            "--policy.input_features=null",
+            "--policy.output_features=null",
             "--dataset.repo_id=lerobot/libero_plus",
             f"--dataset.root={dataset_root}",
             "--dataset.video_backend=pyav",
@@ -144,15 +151,29 @@ def main() -> int:
         )
         trial["micro_steps"] = ga
         trial["optimizer_steps"] = 1 if rc == 0 else 0
+        trial["log_path"] = str(log_path)
         trials.append(trial)
         shutil.rmtree(out_dir, ignore_errors=True)
         if rc == 0:
             selected = trial
             break
         if trial["status"] != "OOM":
+            write_result(
+                result_path,
+                {
+                    "status": "FAILED",
+                    "model": "smolvla",
+                    "source_ref": SMOL_REF,
+                    "python": version[0] if version else None,
+                    "gpu_name": gpu_name,
+                    "gpu_vram_mib": gpu_vram,
+                    "failing_trial": trial,
+                    "trials": trials,
+                    "error_tail": text[-8000:],
+                },
+            )
             raise RuntimeError(f"SmolVLA probe failed for non-OOM reason: {trial}; log={log_path}")
 
-    result_path = drive / "model-benchmark-v1/batch-probes/smolvla.json"
     if selected is None:
         write_result(
             result_path,
