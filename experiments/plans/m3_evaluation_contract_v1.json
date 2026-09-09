@@ -1,0 +1,54 @@
+{
+  "schema_version": 1,
+  "stage": "M3_simulator_evaluation",
+  "status": "FROZEN",
+  "selected_dataset_variant": "V2_SQRT_BALANCED_RAW",
+  "selected_episode_ids_sha256": "73ed0d3b0c5e73c745c0aa2e81517ce1fa40240c75f9eb040d65b6876ba08239",
+  "seed_set": [20260906, 20260907],
+  "max_steps_per_episode": 300,
+  "required_metrics": [
+    "simulator_success_rate",
+    "steps_to_success",
+    "episode_duration",
+    "inference_latency",
+    "peak_inference_vram",
+    "train_wall_time",
+    "peak_train_vram"
+  ],
+  "episode_record": {
+    "required_fields": [
+      "model",
+      "checkpoint_ref",
+      "source_ref",
+      "order",
+      "track",
+      "seed",
+      "task_id",
+      "success",
+      "steps",
+      "episode_duration_sec",
+      "mean_inference_latency_ms",
+      "peak_inference_vram_mib"
+    ]
+  },
+  "aggregation": {
+    "simulator_success_rate": "success_count / episode_count",
+    "steps_to_success": "mean steps among successful episodes; if there are zero successes, use max_steps_per_episode=300 as a documented censored value",
+    "episode_duration": "mean episode_duration_sec over all episodes",
+    "inference_latency": "mean mean_inference_latency_ms over all episodes",
+    "peak_inference_vram": "maximum peak_inference_vram_mib over all episodes",
+    "train_wall_time": "copied from the exact training result linked to the evaluated checkpoint",
+    "peak_train_vram": "copied from the exact training result linked to the evaluated checkpoint"
+  },
+  "provenance": {
+    "checkpoint_ref_required": true,
+    "source_ref_required": true,
+    "training_result_ref_required": true,
+    "order_track_identity_required": true
+  },
+  "safety": {
+    "dry_run_allowed": true,
+    "simulator_execution_by_default": false,
+    "promotion_logic_separate": true
+  }
+}
