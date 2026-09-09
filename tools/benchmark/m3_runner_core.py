@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Model-independent accounting/orchestration core for PARC2026 M3.
 
-This module does not train a model by itself.  Framework-specific adapters plug
+This module does not train a model by itself. Framework-specific adapters plug
 into these accounting primitives so sample/time semantics stay identical across
 π0.5, SmolVLA and OpenVLA-OFT.
 """
@@ -13,7 +13,7 @@ import os
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable, Iterable
+from typing import Any, Callable
 
 D10_VARIANT = "V2_SQRT_BALANCED_RAW"
 D10_HASH = "73ed0d3b0c5e73c745c0aa2e81517ce1fa40240c75f9eb040d65b6876ba08239"
@@ -175,8 +175,8 @@ def load_batch_probe_summary(path: Path) -> tuple[dict[str, Any], dict[str, dict
     return data, validate_batch_probe_summary(data)
 
 
-def build_run_matrix() -> list[dict[str, str]]:
-    rows: list[dict[str, str]] = []
+def build_run_matrix() -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
     for order_name in ("forward", "reverse"):
         for track in TRACKS:
             for sequence_index, model in enumerate(ORDERS[order_name]):
@@ -185,7 +185,7 @@ def build_run_matrix() -> list[dict[str, str]]:
                         "order": order_name,
                         "track": track,
                         "model": model,
-                        "sequence_index": str(sequence_index),
+                        "sequence_index": sequence_index,
                     }
                 )
     return rows
@@ -217,11 +217,9 @@ def build_execution_plan(
     rows = build_run_matrix()
     for row in rows:
         row["sampling_schedule_sha256"] = schedule_hashes[row["track"]]
-        row["micro_batch"] = str(model_batches[row["model"]]["micro_batch"])
-        row["gradient_accumulation"] = str(
-            model_batches[row["model"]]["gradient_accumulation"]
-        )
-        row["effective_batch_size"] = str(EFFECTIVE_BATCH)
+        row["micro_batch"] = model_batches[row["model"]]["micro_batch"]
+        row["gradient_accumulation"] = model_batches[row["model"]]["gradient_accumulation"]
+        row["effective_batch_size"] = EFFECTIVE_BATCH
     return {
         "schema_version": 1,
         "stage": "M3_guarded_execution_plan",
