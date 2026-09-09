@@ -1,13 +1,15 @@
 #!/usr/bin/env python3
 """Resolve frozen M3 sample schedules into framework-consumable indices.
 
-This module is intentionally training-framework neutral.  It validates the
-canonical schedule produced by ``m3_sampling_schedule.py`` and maps every
-(episode_id, timestep) reference into the relative row index of a LeRobot
-Dataset instantiated with the frozen D10 episode list in manifest order.
+The canonical schedule is expressed as ``(episode_id, timestep)`` pairs.  For a
+live LeRobotDataset we must **not** assume the filtered dataset row order equals
+the manifest order.  The robust mapping is:
 
-The same validated reference stream is also exposed unchanged for the
-OpenVLA selected-pool streaming adapter.  No dataset copy is created.
+``episode_id/timestep`` -> metadata ``dataset_from_index + timestep`` ->
+LeRobot's own absolute-to-relative row map.
+
+OpenVLA keeps the model-neutral episode/timestep references directly.  No
+second dataset copy is created.
 """
 from __future__ import annotations
 
@@ -15,7 +17,7 @@ import hashlib
 import json
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Iterable, Iterator, Sequence
+from typing import Any, Iterable, Iterator, Mapping, Sequence
 
 D10_HASH = "73ed0d3b0c5e73c745c0aa2e81517ce1fa40240c75f9eb040d65b6876ba08239"
 D10_VARIANT = "V2_SQRT_BALANCED_RAW"
@@ -74,6 +76,7 @@ def load_schedule(path: Path, *, require_equal_data: bool = False) -> dict[str, 
 
 
 def build_episode_offsets(episode_ids: Sequence[int], episode_lengths: Sequence[int]) -> dict[int, tuple[int, int]]:
+    """Legacy/local concatenation helper used only where row order is explicitly known."""
     ids = [int(x) for x in episode_ids]
     lengths = [int(x) for x in episode_lengths]
     if len(ids) != len(lengths) or not ids:
@@ -96,6 +99,11 @@ def references_to_relative_indices(
     episode_ids: Sequence[int],
     episode_lengths: Sequence[int],
 ) -> list[int]:
+    """Map against an explicitly concatenated episode order.
+
+    Prefer ``references_to_lerobot_indices`` for a live LeRobotDataset because
+    the filtered Hugging Face dataset may choose its own row ordering.
+    """
     offsets = build_episode_offsets(episode_ids, episode_lengths)
     indices: list[int] = []
     for ref in references:
@@ -108,6 +116,63 @@ def references_to_relative_indices(
             raise ValueError(f"schedule timestep outside episode: episode={episode_id} timestep={timestep} length={length}")
         indices.append(start + timestep)
     return indices
+
+
+def _metadata_row(metadata: Any, episode_id: int) -> Any:
+    """Support pandas DataFrame/indexed rows and plain test dictionaries."""
+    if hasattr(metadata, "loc"):
+        return metadata.loc[episode_id]
+    if isinstance(metadata, Mapping):
+        return metadata[episode_id]
+    raise TypeError("unsupported episode metadata container")
+
+
+def _row_value(row: Any, key: str) -> int:
+    if isinstance(row, Mapping):
+        return int(row[key])
+    return int(row[key])
+
+
+def references_to_lerobot_indices(
+    references: Iterable[dict[str, int]],
+    *,
+    episode_metadata: Any,
+    absolute_to_relative_idx: Mapping[int, int],
+) -> list[int]:
+    """Resolve schedule refs through the dataset's authoritative absolute index map."""
+    if not absolute_to_relative_idx:
+        raise ValueError("LeRobot absolute_to_relative_idx map is required")
+    indices: list[int] = []
+    for ref in references:
+        episode_id = int(ref["episode_id"])
+        timestep = int(ref["timestep"])
+        try:
+            row = _metadata_row(episode_metadata, episode_id)
+        except (KeyError, IndexError) as exc:
+            raise ValueError(f"schedule episode outside D10 metadata: {episode_id}") from exc
+        length = _row_value(row, "length")
+        if not 0 <= timestep < length:
+            raise ValueError(
+                f"schedule timestep outside episode: episode={episode_id} timestep={timestep} length={length}"
+            )
+        absolute = _row_value(row, "dataset_from_index") + timestep
+        if absolute not in absolute_to_relative_idx:
+            raise ValueError(
+                f"scheduled absolute frame is absent from filtered LeRobot dataset: "
+                f"episode={episode_id} timestep={timestep} absolute={absolute}"
+            )
+        indices.append(int(absolute_to_relative_idx[absolute]))
+    return indices
+
+
+def dataset_absolute_to_relative_map(dataset: Any) -> dict[int, int]:
+    """Extract LeRobot's public/private map without silently assuming row order."""
+    mapping = getattr(dataset, "absolute_to_relative_idx", None)
+    if mapping is None:
+        mapping = getattr(dataset, "_absolute_to_relative_idx", None)
+    if mapping is None:
+        raise ValueError("filtered LeRobotDataset does not expose absolute-to-relative mapping")
+    return {int(k): int(v) for k, v in dict(mapping).items()}
 
 
 def iter_sample_refs(schedule: dict[str, Any]) -> Iterator[SampleRef]:
