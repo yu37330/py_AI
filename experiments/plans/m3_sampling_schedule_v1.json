@@ -1,0 +1,43 @@
+{
+  "schema_version": 1,
+  "stage": "M3_deterministic_sampling_schedule",
+  "status": "FROZEN",
+  "purpose": "Ensure all M3 model frameworks consume the same deterministic selected-pool training-example sequence instead of only sharing the same episode pool.",
+  "selected_dataset_variant": "V2_SQRT_BALANCED_RAW",
+  "selected_episode_ids_sha256": "73ed0d3b0c5e73c745c0aa2e81517ce1fa40240c75f9eb040d65b6876ba08239",
+  "selected_frame_count": 1620614,
+  "policy": {
+    "name": "uniform_selected_frames_with_replacement_v1",
+    "example_key": ["episode_id", "timestep"],
+    "counter_based": true,
+    "counter_hash": "sha256",
+    "counter_payload": "parc2026-m3-schedule-v1|<episode_ids_sha256>|<seed>|<sample_index>",
+    "position_rule": "uint256_be(sha256(payload)) mod selected_frame_count",
+    "mapping_rule": "map the global selected-frame position into the manifest-ordered episode list using exact episode lengths from LeRobot meta/episodes parquet",
+    "replacement": true
+  },
+  "equal_data": {
+    "sample_budget": 4800,
+    "materialize_exact_reference_list": true,
+    "zero_overshoot": true
+  },
+  "equal_wall": {
+    "materialize_exact_reference_list": false,
+    "stream_rule": "consume the same deterministic counter stream from sample_index=0 until the runner stops at the first safe optimizer boundary at or after 1800 train-loop seconds",
+    "comparison_note": "Models may consume different prefix lengths because throughput differs, but every model sees the same ordered stream prefix for a given seed."
+  },
+  "seed_set": [20260906, 20260907],
+  "forward_reverse_rule": "Forward and reverse execution orders must reuse the same schedule algorithm, D10 hash, and seed-specific schedule SHA/reference stream. Execution order must never perturb sample generation.",
+  "runtime_output": {
+    "equal_data_manifest": "model-benchmark-v1/schedules/m3_equal_data_seed_<seed>.json",
+    "required_fields": [
+      "policy",
+      "seed",
+      "selected_episode_ids_sha256",
+      "selected_frame_count",
+      "sample_budget",
+      "references",
+      "references_sha256"
+    ]
+  }
+}
