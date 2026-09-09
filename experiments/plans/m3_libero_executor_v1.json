@@ -1,0 +1,34 @@
+{
+  "schema_version": 1,
+  "stage": "M3_LIBERO_simulator_executor",
+  "status": "FROZEN_PRE_EXECUTION",
+  "seed_set": [20260906, 20260907],
+  "max_steps_per_episode": 300,
+  "suites": ["libero_spatial", "libero_object", "libero_goal", "libero_10"],
+  "models": {
+    "pi05": {
+      "backend": "pinned_lerobot_eval",
+      "source_ref": "v0.4.4",
+      "n_action_steps": 10
+    },
+    "smolvla": {
+      "backend": "pinned_lerobot_eval",
+      "source_ref": "3f2c29ef7e44b1ddccbcda3b6a63939e53639e9e"
+    },
+    "openvla_oft": {
+      "backend": "pinned_openvla_oft_run_libero_eval",
+      "source_ref": "e4287e94541f459edc4feabc4e181f537cd569a8",
+      "center_crop": true
+    }
+  },
+  "instrumentation": {
+    "synchronized_select_action_latency": true,
+    "peak_inference_vram": true,
+    "per_episode_success_steps_duration": true,
+    "policy_runtime_type_must_be_preserved": true
+  },
+  "required_output": "episode records accepted by tools/benchmark/m3_evaluation_metrics.py",
+  "execution_guard": "PARC_M3_EXECUTE=1",
+  "smoke_first": true,
+  "automatic_full_evaluation": false
+}
