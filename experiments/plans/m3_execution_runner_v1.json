@@ -1,0 +1,54 @@
+{
+  "schema_version": 1,
+  "stage": "M3_guarded_execution_runner",
+  "status": "FROZEN_PRE_EXECUTION",
+  "selected_dataset_variant": "V2_SQRT_BALANCED_RAW",
+  "selected_episode_ids_sha256": "73ed0d3b0c5e73c745c0aa2e81517ce1fa40240c75f9eb040d65b6876ba08239",
+  "models": ["pi05", "smolvla", "openvla_oft"],
+  "orders": {
+    "forward": ["pi05", "smolvla", "openvla_oft"],
+    "reverse": ["openvla_oft", "smolvla", "pi05"]
+  },
+  "tracks": {
+    "equal_data": {
+      "sample_budget": 4800,
+      "effective_batch_size": 32,
+      "nominal_optimizer_updates": 150,
+      "zero_sample_overshoot": true,
+      "counter_semantics": "count actual training examples consumed, not framework steps"
+    },
+    "equal_wall": {
+      "train_loop_sec": 1800,
+      "timer_start": "immediately before first training-loop batch fetch",
+      "stop": "first safe optimizer boundary at or after target seconds",
+      "excluded_time": [
+        "environment setup",
+        "source/model download",
+        "dataset staging/conversion",
+        "checkpoint merge",
+        "simulator evaluation"
+      ]
+    }
+  },
+  "late_bound_inputs": {
+    "batch_probe_summary_status": "READY_FOR_M3_RUNNER_IMPLEMENTATION",
+    "batch_probe_summary_file": "model-benchmark-v1/m3_batch_probe_summary.json",
+    "per_model_fields": ["micro_batch", "gradient_accumulation", "effective_batch_size"],
+    "sampling_schedule_sha256": "provided by the deterministic schedule controller at execution time"
+  },
+  "execution_guard": {
+    "environment_variable": "PARC_M3_EXECUTE",
+    "required_value": "1",
+    "preflight_requires_guard": false,
+    "smoke_requires_guard": true,
+    "benchmark_requires_guard": true,
+    "default_mode": "preflight"
+  },
+  "output_layout": "model-benchmark-v1/runs/<order>/<track>/<model>/result.json",
+  "safety": {
+    "preflight_starts_training": false,
+    "automatic_benchmark_start": false,
+    "full_rlds_materialization": false,
+    "d10_reselection": false
+  }
+}
