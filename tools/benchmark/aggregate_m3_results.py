@@ -2,7 +2,7 @@
 """Aggregate M3 forward/reverse benchmark evidence and select promotions.
 
 This controller intentionally refuses to promote from training loss or from a
-single execution direction.  A promotable model must provide the complete
+single execution direction. A promotable model must provide the complete
 forward/reverse x equal-data/equal-wall matrix with matching D10, sampling
 schedule, seed and source provenance.
 """
@@ -140,6 +140,8 @@ def _mean(records: list[dict[str, Any]], metric: str) -> float:
 def _model_aggregate(records: list[dict[str, Any]]) -> dict[str, Any]:
     by_combo = {(r["order"], r["track"]): r for r in records}
     expected = {(order, track) for order in ORDERS for track in TRACKS}
+    if len(records) != len(by_combo):
+        raise ValueError("duplicate order/track records are not allowed")
     if set(by_combo) != expected:
         missing = sorted(expected - set(by_combo))
         extra = sorted(set(by_combo) - expected)
@@ -202,6 +204,8 @@ def aggregate(records: Iterable[dict[str, Any]]) -> dict[str, Any]:
         if status == "PASS":
             pass_records[model].append(validate_pass_record(raw))
         elif status == "EXCLUDED_WITH_EVIDENCE":
+            if model in exclusions:
+                raise ValueError(f"duplicate exclusion record for {model}")
             exclusions[model] = validate_exclusion(raw)
         elif status == "FAILED":
             evidence = str(raw.get("evidence") or raw.get("error") or "").strip()
@@ -215,6 +219,8 @@ def aggregate(records: Iterable[dict[str, Any]]) -> dict[str, Any]:
     promotable: list[str] = []
     for model in MODELS:
         if model in exclusions:
+            if pass_records[model] or failures[model]:
+                raise ValueError(f"conflicting exclusion and run evidence for {model}")
             model_summaries[model] = {
                 "status": "EXCLUDED_WITH_EVIDENCE",
                 "evidence": exclusions[model]["evidence"],
@@ -243,6 +249,19 @@ def aggregate(records: Iterable[dict[str, Any]]) -> dict[str, Any]:
         model_summaries[model] = summary
         promotable.append(model)
 
+    common_schedule_hashes: dict[str, str] = {}
+    for track in TRACKS:
+        hashes = {
+            model_summaries[model]["schedule_hashes"][track]
+            for model in promotable
+        }
+        if len(hashes) > 1:
+            raise ValueError(
+                f"sampling schedule differs across promotable models for {track}: {sorted(hashes)}"
+            )
+        if hashes:
+            common_schedule_hashes[track] = next(iter(hashes))
+
     def ranking_key(model: str):
         metrics = model_summaries[model]["overall_metrics"]
         return (
@@ -264,6 +283,7 @@ def aggregate(records: Iterable[dict[str, Any]]) -> dict[str, Any]:
         "required_orders": list(ORDERS),
         "required_tracks": list(TRACKS),
         "seed_set": list(SEED_SET),
+        "sampling_schedule_hashes": common_schedule_hashes,
         "primary_metric": "simulator_success_rate",
         "training_loss_used_for_promotion": False,
         "max_promotions": MAX_PROMOTIONS,
