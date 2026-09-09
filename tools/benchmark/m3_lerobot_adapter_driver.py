@@ -1,21 +1,23 @@
 #!/usr/bin/env python3
-"""LeRobot-side M3 adapter driver.
+"""LeRobot-side M3 adapter driver for π0.5 and SmolVLA.
 
-The driver validates the exact 72d batch choice and canonical schedule, resolves
-all schedule references into the row order consumed by a D10-filtered
-LeRobotDataset, and emits an execution contract for the model-specific train
-loop.  It intentionally fails closed rather than falling back to LeRobot's
-native random sampler.
+Preflight validates 72d/D10/schedule provenance without loading a model.
+Smoke/benchmark equal-data execution delegates to ``m3_lerobot_train_entry.py``,
+which injects the exact fixed sampler into the pinned upstream trainer.
+Equal-wall still fails closed until its optimizer-boundary checkpoint stop hook
+is implemented; it never falls back to a step approximation.
 """
 from __future__ import annotations
 
 import argparse
 import json
 from pathlib import Path
+import subprocess
+import sys
 
 from tools.benchmark.m3_runner_core import D10_HASH, require_execution_guard, validate_batch_probe_summary
-from tools.benchmark.m3_scheduled_data import load_schedule, references_to_relative_indices
-from tools.data.openvla_lerobot_streaming import load_episode_metadata, load_manifest
+from tools.benchmark.m3_scheduled_data import load_schedule
+from tools.data.openvla_lerobot_streaming import load_manifest
 
 SUPPORTED = {"pi05", "smolvla"}
 
@@ -50,43 +52,83 @@ def main() -> int:
     manifest = load_manifest(args.manifest)
     if manifest.get("episode_ids_sha256") != D10_HASH:
         raise ValueError("manifest D10 mismatch")
-    ids = [int(x) for x in manifest["episode_ids"]]
-    metadata = load_episode_metadata(args.dataset_root, ids)
-    lengths = [int(metadata.loc[episode_id]["length"]) for episode_id in ids]
     schedule = load_schedule(args.schedule, require_equal_data=(args.track == "equal_data"))
-    relative_indices = references_to_relative_indices(
-        schedule["references"], episode_ids=ids, episode_lengths=lengths
-    )
-    if len(relative_indices) != len(schedule["references"]):
-        raise RuntimeError("schedule row resolution lost samples")
-    # The actual train-loop patch is deliberately represented explicitly.  The
-    # adapter must consume these indices in order; falling back to shuffle or an
-    # EpisodeAwareSampler would violate same_sampling_policy.
-    payload = {
-        "schema_version": 1,
-        "stage": "M3_lerobot_adapter_driver",
-        "status": "READY_FOR_TRAIN_LOOP",
-        "model": args.model,
-        "track": args.track,
-        "order": args.order,
-        "mode": args.mode,
-        "selected_episode_ids_sha256": D10_HASH,
-        "schedule_sha256": schedule.get("schedule_sha256"),
-        "resolved_reference_count": len(relative_indices),
-        "resolved_index_sha256": __import__("hashlib").sha256(
-            json.dumps(relative_indices, separators=(",", ":")).encode("utf-8")
-        ).hexdigest(),
-        "micro_batch": args.micro_batch,
-        "gradient_accumulation": args.grad_accum,
-        "effective_batch_size": 32,
-        "sampler_requirement": "fixed_relative_indices_in_exact_schedule_order",
-        "native_random_sampler_allowed": False,
-        "source_root": str(args.source_root),
-        "benchmark_training_started": False,
-    }
-    args.out.parent.mkdir(parents=True, exist_ok=True)
-    args.out.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
-    print(json.dumps(payload, indent=2))
+
+    if args.mode == "preflight":
+        payload = {
+            "schema_version": 1,
+            "stage": "M3_lerobot_adapter_driver",
+            "status": "READY_FOR_TRAIN_LOOP",
+            "model": args.model,
+            "track": args.track,
+            "order": args.order,
+            "mode": args.mode,
+            "selected_episode_ids_sha256": D10_HASH,
+            "schedule_sha256": schedule.get("schedule_sha256"),
+            "reference_count": len(schedule["references"]),
+            "micro_batch": args.micro_batch,
+            "gradient_accumulation": args.grad_accum,
+            "effective_batch_size": 32,
+            "sampler_requirement": "resolve absolute dataset index through live LeRobotDataset absolute-to-relative map, then fixed schedule order",
+            "native_random_sampler_allowed": False,
+            "source_root": str(args.source_root),
+            "benchmark_training_started": False,
+        }
+        args.out.parent.mkdir(parents=True, exist_ok=True)
+        args.out.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+        print(json.dumps(payload, indent=2))
+        return 0
+
+    if args.track == "equal_wall":
+        payload = {
+            "schema_version": 1,
+            "stage": "M3_lerobot_adapter_driver",
+            "status": "BLOCKED_SAFE_WALL_STOP_NOT_IMPLEMENTED",
+            "model": args.model,
+            "track": args.track,
+            "order": args.order,
+            "selected_episode_ids_sha256": D10_HASH,
+            "reason": "Do not approximate 1800 sec with a step budget. A checkpoint-preserving safe optimizer-boundary stop hook is required.",
+            "benchmark_training_started": False,
+        }
+        args.out.parent.mkdir(parents=True, exist_ok=True)
+        args.out.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+        print(json.dumps(payload, indent=2))
+        return 3
+
+    repo_root = Path(__file__).resolve().parents[2]
+    output_dir = args.out.parent / "checkpoint_run"
+    entry = repo_root / "tools/benchmark/m3_lerobot_train_entry.py"
+    cmd = [
+        sys.executable,
+        "-u",
+        str(entry),
+        "--repo-root",
+        str(repo_root),
+        "--model",
+        args.model,
+        "--source-root",
+        str(args.source_root),
+        "--dataset-root",
+        str(args.dataset_root),
+        "--manifest",
+        str(args.manifest),
+        "--schedule",
+        str(args.schedule),
+        "--micro-batch",
+        str(args.micro_batch),
+        "--grad-accum",
+        str(args.grad_accum),
+        "--mode",
+        args.mode,
+        "--order",
+        args.order,
+        "--output-dir",
+        str(output_dir),
+        "--result-out",
+        str(args.out),
+    ]
+    subprocess.run(cmd, cwd=str(repo_root), check=True)
     return 0
 
 
