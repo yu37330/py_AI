@@ -6,12 +6,12 @@ import pytest
 from tools.benchmark.m3_model_adapters import (
     SOURCE_REFS,
     build_adapter_command,
-    build_run_specs,
     default_runtimes,
 )
 from tools.benchmark.m3_scheduled_data import (
     D10_HASH,
     build_episode_offsets,
+    references_to_lerobot_indices,
     references_to_relative_indices,
     sha256_json,
 )
@@ -55,11 +55,36 @@ def _schedule_payload():
     }
 
 
-def test_reference_mapping_preserves_schedule_order():
+def test_reference_mapping_preserves_explicit_concatenation_order():
     offsets = build_episode_offsets([10, 11], [3, 2])
     assert offsets == {10: (0, 3), 11: (3, 2)}
     refs = _schedule_payload()["references"]
     assert references_to_relative_indices(refs, episode_ids=[10, 11], episode_lengths=[3, 2]) == [1, 3, 2]
+
+
+def test_live_lerobot_mapping_uses_absolute_to_relative_map_not_manifest_order():
+    # Episode 10 starts at absolute 100, episode 11 at absolute 50.  The
+    # filtered dataset stores absolute rows in a different relative order.
+    metadata = {
+        10: {"dataset_from_index": 100, "length": 3},
+        11: {"dataset_from_index": 50, "length": 2},
+    }
+    absolute_to_relative = {50: 0, 51: 1, 100: 2, 101: 3, 102: 4}
+    refs = _schedule_payload()["references"]
+    assert references_to_lerobot_indices(
+        refs,
+        episode_metadata=metadata,
+        absolute_to_relative_idx=absolute_to_relative,
+    ) == [3, 0, 4]
+
+
+def test_live_lerobot_mapping_rejects_missing_absolute_frame():
+    with pytest.raises(ValueError, match="absent from filtered"):
+        references_to_lerobot_indices(
+            [{"episode_id": 10, "timestep": 1}],
+            episode_metadata={10: {"dataset_from_index": 100, "length": 2}},
+            absolute_to_relative_idx={100: 0},
+        )
 
 
 def test_reference_mapping_rejects_episode_outside_pool():
@@ -92,6 +117,24 @@ def test_openvla_command_requires_streaming_contract(tmp_path):
             out=tmp_path / "o.json",
             streaming_contract=None,
         )
+
+
+def test_lerobot_equal_data_entry_has_fixed_sampler_and_explicit_wall_block():
+    root = Path(__file__).resolve().parents[1]
+    entry = (root / "tools/benchmark/m3_lerobot_train_entry.py").read_text()
+    driver = (root / "tools/benchmark/m3_lerobot_adapter_driver.py").read_text()
+    for token in (
+        "FixedScheduleDataLoader",
+        "references_to_lerobot_indices",
+        "DataLoaderShard.__iter__",
+        "PARC_M3_EXECUTE",
+        '"samples_consumed": len(references)',
+        '"optimizer_updates": optimizer_updates',
+        '"native_random_sampler_used": False',
+    ):
+        assert token in entry
+    assert "BLOCKED_SAFE_WALL_STOP_NOT_IMPLEMENTED" in driver
+    assert "Do not approximate 1800 sec with a step budget" in driver
 
 
 def test_plan_contract_disallows_native_random_sampler():
