@@ -1,0 +1,44 @@
+{
+  "schema_version": 1,
+  "stage": "M3_model_adapter_handoff",
+  "status": "FROZEN_PRE_EXECUTION",
+  "selected_dataset_variant": "V2_SQRT_BALANCED_RAW",
+  "selected_episode_ids_sha256": "73ed0d3b0c5e73c745c0aa2e81517ce1fa40240c75f9eb040d65b6876ba08239",
+  "models": ["pi05", "smolvla", "openvla_oft"],
+  "batch_config_source": "m3_batch_probe_summary.json",
+  "batch_values_are_late_bound": true,
+  "effective_batch_size": 32,
+  "sampling": {
+    "policy": "uniform_selected_frames_with_replacement_v1",
+    "canonical_schedule_required": true,
+    "native_random_sampler_allowed": false,
+    "forward_reverse_reuse_same_schedule_hash": true
+  },
+  "tracks": {
+    "equal_data": {
+      "sample_budget": 4800,
+      "zero_overshoot": true
+    },
+    "equal_wall": {
+      "train_loop_sec": 1800,
+      "stop_only_at_optimizer_boundary": true,
+      "exclude_setup_download_eval": true
+    }
+  },
+  "execution": {
+    "forward": ["pi05", "smolvla", "openvla_oft"],
+    "reverse": ["openvla_oft", "smolvla", "pi05"],
+    "smoke_and_benchmark_require": "PARC_M3_EXECUTE=1",
+    "automatic_full_run": false
+  },
+  "openvla": {
+    "bridge": "lerobot_streaming",
+    "modified_libero_rlds_allowed": false,
+    "full_rlds_materialization": false,
+    "image_aug_real_m3": true,
+    "num_images_in_input": 2,
+    "use_proprio": true,
+    "use_l1_regression": true
+  },
+  "current_gate": "adapter data/runtime handoff may be prepared before 72d; real train loops must use the 72d-selected batch settings and the canonical schedule"
+}
