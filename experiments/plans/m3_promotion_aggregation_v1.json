@@ -1,0 +1,48 @@
+{
+  "schema_version": 1,
+  "stage": "M3_forward_reverse_promotion_aggregation",
+  "status": "FROZEN",
+  "selected_dataset_variant": "V2_SQRT_BALANCED_RAW",
+  "selected_episode_ids_sha256": "73ed0d3b0c5e73c745c0aa2e81517ce1fa40240c75f9eb040d65b6876ba08239",
+  "models": ["pi05", "smolvla", "openvla_oft"],
+  "orders": ["forward", "reverse"],
+  "tracks": ["equal_data", "equal_wall"],
+  "required_metrics": [
+    "simulator_success_rate",
+    "steps_to_success",
+    "episode_duration",
+    "inference_latency",
+    "peak_inference_vram",
+    "train_wall_time",
+    "peak_train_vram"
+  ],
+  "promotion": {
+    "max_models": 2,
+    "primary": "simulator_success_rate",
+    "training_loss_alone_is_not_sufficient": true,
+    "ranking": "descending mean simulator_success_rate across all required forward/reverse x equal_data/equal_wall PASS records",
+    "tie_breakers": [
+      "lower mean steps_to_success",
+      "lower mean inference_latency",
+      "lower mean peak_inference_vram"
+    ]
+  },
+  "order_control": {
+    "complete_model_requires": [
+      "forward/equal_data",
+      "forward/equal_wall",
+      "reverse/equal_data",
+      "reverse/equal_wall"
+    ],
+    "same_sampling_schedule_required": true,
+    "same_seed_set_required": true,
+    "same_source_ref_per_model_required": true
+  },
+  "failure_policy": {
+    "allowed_statuses": ["PASS", "FAILED", "EXCLUDED_WITH_EVIDENCE"],
+    "promotion_requires_complete_pass_matrix": true,
+    "excluded_model_requires_evidence": true,
+    "failed_or_excluded_models_are_never_promoted": true
+  },
+  "output": "model-benchmark-v1/m3_promotion_summary.json"
+}
