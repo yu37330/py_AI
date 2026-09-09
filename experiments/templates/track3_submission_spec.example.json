@@ -1,0 +1,25 @@
+{
+  "source_sha": "0000000000000000000000000000000000000000",
+  "dataset": {
+    "variant": "V2_SQRT_BALANCED_RAW",
+    "manifest_path": "/content/drive/MyDrive/parc2026-cache/pi05-ablation-group-aware-v2/dataset_ablation_manifests_v2_group_aware/V2_SQRT_BALANCED_RAW.json",
+    "manifest_sha256": "cd69c47224a84fec57886776f3981bb207c8c5e2308cebb64b5300bf96e46395",
+    "episode_ids_sha256": "73ed0d3b0c5e73c745c0aa2e81517ce1fa40240c75f9eb040d65b6876ba08239"
+  },
+  "model": {
+    "name": "REPLACE_WITH_FINAL_MODEL",
+    "artifact_path": "REPLACE_WITH_FINAL_MODEL_OR_ADAPTER_PATH",
+    "artifact_sha256": "",
+    "immutable_ref": "",
+    "config_path": "REPLACE_WITH_FINAL_CONFIG_PATH"
+  },
+  "benchmark": {
+    "promotion_summary_path": "REPLACE_WITH_M3_PROMOTION_SUMMARY_PATH"
+  },
+  "evaluation": {
+    "metrics_path": "REPLACE_WITH_FINAL_EVALUATION_METRICS_PATH"
+  },
+  "reproduction": {
+    "command": "REPLACE_WITH_ONE_EXACT_REPRODUCTION_COMMAND"
+  }
+}
