@@ -50,7 +50,7 @@ def main() -> int:
     contract = json.loads(args.streaming_contract.read_text(encoding="utf-8"))
     if contract.get("status") != "PASS" or contract.get("bridge_type") != "lerobot_streaming":
         raise ValueError("69c streaming contract is not PASS lerobot_streaming")
-    if contract.get("selected_episode_ids_sha256") != D10_HASH:
+    if contract.get("source_episode_ids_sha256") != D10_HASH:
         raise ValueError("69c streaming D10 mismatch")
     stats = contract.get("dataset_statistics")
     if not isinstance(stats, dict) or int(stats.get("num_transitions", 0)) <= 0:
