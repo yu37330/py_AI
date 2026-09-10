@@ -14,6 +14,7 @@ from tools.benchmark.m3_runner_core import D10_HASH, EXECUTE_ENV, EXECUTE_VALUE,
 
 SEEDS = (20260906, 20260907)
 SUITES = ("libero_spatial", "libero_object", "libero_goal", "libero_10")
+TASKS_PER_SUITE = 10
 SOURCE_REFS = {
     "pi05": "v0.4.4",
     "smolvla": "3f2c29ef7e44b1ddccbcda3b6a63939e53639e9e",
@@ -50,6 +51,26 @@ def default_eval_runtimes(root: Path) -> dict[str, EvalRuntime]:
     }
 
 
+def runtime_blockers(runtime: EvalRuntime, repo_root: Path, *, strict: bool) -> list[str]:
+    if not strict:
+        return []
+    entry = (
+        repo_root / "tools/benchmark/m3_openvla_eval_entry.py"
+        if runtime.model == "openvla_oft"
+        else repo_root / "tools/benchmark/m3_lerobot_eval_entry.py"
+    )
+    checks = {
+        "python": Path(runtime.python),
+        "source_root": Path(runtime.command_root),
+        "entry": entry,
+    }
+    return [
+        f"{runtime.model}:{label}_missing:{path}"
+        for label, path in checks.items()
+        if not path.exists()
+    ]
+
+
 def validate_training_result(path: Path) -> dict[str, Any]:
     data = json.loads(Path(path).read_text(encoding="utf-8"))
     if data.get("status") != "PASS":
@@ -67,6 +88,12 @@ def validate_training_result(path: Path) -> dict[str, Any]:
         raise ValueError("training result order missing/invalid")
     if data.get("track") not in {"equal_data", "equal_wall"}:
         raise ValueError("training result track missing/invalid")
+    metrics = data.get("metrics")
+    if not isinstance(metrics, dict):
+        raise ValueError("training result metrics missing")
+    for metric in ("train_wall_time", "peak_train_vram"):
+        if metric not in metrics:
+            raise ValueError(f"training result missing required metric: {metric}")
     return data
 
 
@@ -95,6 +122,8 @@ def build_jobs(
                     str(entry),
                     "--repo-root",
                     str(repo_root),
+                    "--source-root",
+                    runtime.command_root,
                     "--training-result",
                     str(training_result_path),
                     "--model",
@@ -137,6 +166,8 @@ def build_jobs(
                 "model": model,
                 "seed": seed,
                 "suite": suite,
+                "trials_per_task": trials,
+                "expected_episode_records": TASKS_PER_SUITE * trials,
                 "runtime": asdict(runtime),
                 "output_dir": str(out),
                 "records_out": str(records_out),
@@ -171,6 +202,10 @@ def execute_jobs(jobs: list[dict[str, Any]], *, mode: str) -> list[dict[str, Any
         episodes = payload.get("episodes")
         if not isinstance(episodes, list) or not episodes:
             raise RuntimeError(f"evaluation job produced no episode records: {job['records_out']}")
+        if len(episodes) != int(job["expected_episode_records"]):
+            raise RuntimeError(
+                f"evaluation job record count mismatch: {len(episodes)} != {job['expected_episode_records']}"
+            )
         records.extend(episodes)
     return records
 
@@ -200,19 +235,27 @@ def main() -> int:
         output_root=args.output_root,
         smoke=args.mode == "smoke",
     )
+    runtime = default_eval_runtimes(args.parc_root)[training["model"]]
+    blockers = runtime_blockers(runtime, args.repo_root, strict=args.mode != "preflight")
     plan = {
-        "schema_version": 1,
+        "schema_version": 2,
         "stage": "M3_LIBERO_simulator_executor",
-        "status": "READY_FOR_EVAL_EXECUTION",
+        "status": "READY_FOR_EVAL_EXECUTION" if not blockers else "BLOCKED",
         "model": training["model"],
         "checkpoint_ref": training["checkpoint_ref"],
         "source_ref": training["source_ref"],
         "selected_episode_ids_sha256": D10_HASH,
         "seed_set": list(SEEDS),
         "suites": list(SUITES),
+        "tasks_per_suite": TASKS_PER_SUITE,
+        "trials_per_task": 1 if args.mode == "smoke" else 10,
+        "expected_episode_records": len(SEEDS) * len(SUITES) * TASKS_PER_SUITE * (1 if args.mode == "smoke" else 10),
         "max_steps_per_episode": 300,
+        "hardware_gate": "single NVIDIA A100 with >=38000 MiB",
+        "source_revision_gate": True,
         "mode": args.mode,
         "execution_guard": {"environment_variable": EXECUTE_ENV, "required_value": EXECUTE_VALUE},
+        "blockers": blockers,
         "jobs": jobs,
         "simulator_started": False,
         "normalization_target": "tools/benchmark/m3_evaluation_metrics.py",
@@ -220,8 +263,14 @@ def main() -> int:
     args.plan_out.parent.mkdir(parents=True, exist_ok=True)
     args.plan_out.write_text(json.dumps(plan, indent=2) + "\n", encoding="utf-8")
     print(json.dumps({"status": plan["status"], "jobs": len(jobs), "plan": str(args.plan_out)}, indent=2))
+    if blockers:
+        return 2
     if args.execute:
         records = execute_jobs(jobs, mode=args.mode)
+        if len(records) != int(plan["expected_episode_records"]):
+            raise RuntimeError(
+                f"combined evaluation record count mismatch: {len(records)} != {plan['expected_episode_records']}"
+            )
         combined_path = Path(args.output_root) / training["model"] / "episode_records_all.json"
         combined_path.parent.mkdir(parents=True, exist_ok=True)
         combined_path.write_text(json.dumps({"episodes": records}, indent=2) + "\n", encoding="utf-8")
