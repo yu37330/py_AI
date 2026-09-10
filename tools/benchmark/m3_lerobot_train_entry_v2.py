@@ -407,7 +407,7 @@ def main() -> int:
     accelerate_dl.DataLoaderShard.__iter__ = timed_shard_iter
     trainer.update_policy = timed_update
 
-    args.output_dir.mkdir(parents=True, exist_ok=True)
+    args.output_dir.parent.mkdir(parents=True, exist_ok=True)
     if args.model == "pi05":
         os.environ["LEROBOT_GRAD_ACCUM"] = str(args.grad_accum)
         steps = expected_optimizer_updates if args.track == "equal_data" else HUGE_STEPS
