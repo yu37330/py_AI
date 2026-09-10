@@ -1,7 +1,7 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "stage": "Track3_final_candidate_freeze",
-  "status": "FROZEN_PRE_EXECUTION",
+  "status": "IMPLEMENTED_PENDING_REAL_M3_EVIDENCE",
   "deadline_jst": "2026-09-17T23:59:00+09:00",
   "artifact_freeze_target_jst": "2026-09-15T23:59:00+09:00",
   "selected_dataset_variant": "V2_SQRT_BALANCED_RAW",
@@ -13,19 +13,63 @@
     "max_promoted_models": 2,
     "primary_metric": "simulator_success_rate",
     "training_loss_may_not_select": true,
-    "explicit_rationale_required": true
+    "explicit_rationale_required": true,
+    "forward_reverse_matrix_required": true,
+    "required_orders": ["forward", "reverse"],
+    "required_tracks": ["equal_data", "equal_wall"],
+    "non_selected_models_require_complete_matrix_or_documented_exclusion": true,
+    "documented_exclusion_status": "EXCLUDED_WITH_EVIDENCE"
+  },
+  "final_training": {
+    "status": "PASS",
+    "checkpoint_ref_required": true,
+    "source_ref_required": true,
+    "train_wall_time_required": true,
+    "peak_train_vram_required": true,
+    "openvla_checkpoint_eval_ready_required": true,
+    "openvla_lora_merge_excluded_from_train_wall_time": true
+  },
+  "final_evaluation": {
+    "status": "PASS",
+    "stage": "M3_simulator_evaluation",
+    "seed_set": [20260906, 20260907],
+    "max_steps_per_episode": 300,
+    "episode_count": 800,
+    "episodes_per_seed": 400,
+    "smoke_evidence_is_insufficient": true,
+    "exact_training_result_link_required": true,
+    "required_metrics": [
+      "simulator_success_rate",
+      "steps_to_success",
+      "episode_duration",
+      "inference_latency",
+      "peak_inference_vram",
+      "train_wall_time",
+      "peak_train_vram"
+    ]
+  },
+  "dry_run": {
+    "available_before_promotion": true,
+    "status_when_incomplete": "NOT_READY",
+    "not_ready_is_nonfatal": true,
+    "output": "freeze_readiness.json",
+    "starts_training": false,
+    "starts_evaluation": false,
+    "uploads": false
   },
   "freeze_requires": [
     "full 40-hex source SHA",
     "exact D10 manifest and hash",
+    "complete M3 promotion evidence or explicit exclusion for every compared model",
     "PASS final training result with checkpoint_ref/source_ref",
-    "PASS simulator evaluation linked to the exact checkpoint",
+    "PASS 800-episode simulator evaluation linked to the exact training result and checkpoint",
     "complete required evaluation metrics",
     "readable final model/adapter artifact",
     "readable final config",
     "exact reproduction command"
   ],
   "outputs": [
+    "freeze_readiness.json",
     "final_candidate_selection.json",
     "track3_submission_spec.json",
     "submission_artifact_freeze.json"
@@ -33,5 +77,6 @@
   "handoff": "tools/submission/build_track3_submission_manifest.py",
   "final_status": "SUBMISSION_ARTIFACT_FROZEN",
   "automatic_long_training": false,
+  "automatic_simulator_evaluation": false,
   "automatic_omnicampus_upload": false
 }
