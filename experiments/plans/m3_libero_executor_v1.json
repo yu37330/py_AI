@@ -40,6 +40,8 @@
       "source_ref": "e4287e94541f459edc4feabc4e181f537cd569a8",
       "center_crop": true,
       "episode_entry": "tools/benchmark/m3_openvla_eval_entry.py",
+      "checkpoint_must_be_merged_for_upstream_evaluator": true,
+      "training_result_must_mark_checkpoint_eval_ready": true,
       "checkpoint_must_expose_global_D10_normalization_under_all_four_suite_keys": true,
       "silent_upstream_episode_errors_are_fatal": true,
       "replay_video_encoding_disabled": true
