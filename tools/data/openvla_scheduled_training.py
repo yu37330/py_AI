@@ -188,7 +188,9 @@ def load_scheduled_windows(
 
     if len(windows) != len(references):
         raise RuntimeError(f"scheduled window count mismatch: {len(windows)} != {len(references)}")
-    return [windows[i] for i in range(len(references))]
+    # Keep the caller-provided canonical order even when this is a later chunk
+    # whose absolute sample_index does not start at zero.
+    return [windows[int(ref["sample_index"])] for ref in references]
 
 
 def make_scheduled_torch_dataset(
