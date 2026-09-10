@@ -1,12 +1,9 @@
 #!/usr/bin/env python3
 """Guarded M3 model-adapter orchestration for π0.5, SmolVLA and OpenVLA-OFT.
 
-This layer connects the already-frozen runner/sampling contracts to concrete
-model runtime environments.  It deliberately keeps the final micro-batch and
-gradient-accumulation values late-bound from 72d.
-
-It does not silently start a benchmark: smoke/benchmark modes require the same
-PARC_M3_EXECUTE=1 opt-in as m3_runner_core.
+Preflight validates model/runtime/data contracts. Smoke and benchmark modes
+launch the real scheduled training entries. Final micro-batch and gradient
+accumulation are always loaded from the 72d summary at runtime.
 """
 from __future__ import annotations
 
@@ -24,7 +21,6 @@ from tools.benchmark.m3_runner_core import (
     EQUAL_WALL_SEC,
     EXECUTE_ENV,
     EXECUTE_VALUE,
-    MODELS,
     ORDERS,
     require_execution_guard,
     validate_batch_probe_summary,
@@ -33,6 +29,7 @@ from tools.benchmark.m3_scheduled_data import load_schedule
 
 ROOT_DEFAULT = Path("/content/parc2026")
 DRIVE_DEFAULT = Path("/content/drive/MyDrive/parc2026-cache")
+SEEDS = (20260906, 20260907)
 
 SOURCE_REFS = {
     "pi05": "v0.4.4",
@@ -88,9 +85,22 @@ def load_batch_summary(path: Path) -> dict[str, Any]:
     return payload
 
 
-def runtime_preflight(runtime: AdapterRuntime, *, strict_files: bool = True) -> list[str]:
+def runtime_preflight(
+    runtime: AdapterRuntime,
+    *,
+    repo: Path | None = None,
+    strict_files: bool = True,
+) -> list[str]:
     blockers: list[str] = []
-    for label, raw in (("python", runtime.python), ("source_root", runtime.source_root), ("driver", runtime.driver)):
+    items = [("python", runtime.python), ("source_root", runtime.source_root), ("driver", runtime.driver)]
+    if repo is not None:
+        entry = (
+            Path(repo) / "tools/benchmark/m3_openvla_train_entry.py"
+            if runtime.model == "openvla_oft"
+            else Path(repo) / "tools/benchmark/m3_lerobot_train_entry_v2.py"
+        )
+        items.append(("train_entry", str(entry)))
+    for label, raw in items:
         p = Path(raw)
         if strict_files and not p.exists():
             blockers.append(f"{runtime.model}:{label}_missing:{p}")
@@ -111,6 +121,7 @@ def build_adapter_command(
     out: Path,
     streaming_contract: Path | None = None,
 ) -> list[str]:
+    """Build the contract-only preflight command."""
     if track not in {"equal_data", "equal_wall"}:
         raise ValueError(f"unsupported track: {track}")
     if order not in ORDERS:
@@ -153,6 +164,70 @@ def build_adapter_command(
     return cmd
 
 
+def build_training_command(
+    *,
+    runtime: AdapterRuntime,
+    repo: Path,
+    batch_cfg: dict[str, Any],
+    schedule_path: Path,
+    dataset_root: Path,
+    manifest_path: Path,
+    track: str,
+    order: str,
+    mode: str,
+    output_dir: Path,
+    result_out: Path,
+    streaming_contract: Path | None = None,
+) -> list[str]:
+    if mode not in {"smoke", "benchmark"}:
+        raise ValueError("live M3 training command is only valid for smoke/benchmark")
+    require_execution_guard(mode)
+    common = [
+        "--repo-root",
+        str(repo),
+        "--source-root",
+        runtime.source_root,
+        "--dataset-root",
+        str(dataset_root),
+        "--manifest",
+        str(manifest_path),
+        "--schedule",
+        str(schedule_path),
+        "--micro-batch",
+        str(int(batch_cfg["micro_batch"])),
+        "--grad-accum",
+        str(int(batch_cfg["gradient_accumulation"])),
+        "--track",
+        track,
+        "--mode",
+        mode,
+        "--order",
+        order,
+        "--output-dir",
+        str(output_dir),
+        "--result-out",
+        str(result_out),
+    ]
+    if runtime.model == "openvla_oft":
+        if streaming_contract is None:
+            raise ValueError("OpenVLA live training requires validated 69c streaming contract")
+        entry = Path(repo) / "tools/benchmark/m3_openvla_train_entry.py"
+        return [
+            runtime.python,
+            "-m",
+            "torch.distributed.run",
+            "--standalone",
+            "--nnodes=1",
+            "--nproc-per-node=1",
+            str(entry),
+            *common,
+            "--streaming-contract",
+            str(streaming_contract),
+        ]
+    entry = Path(repo) / "tools/benchmark/m3_lerobot_train_entry_v2.py"
+    return [runtime.python, "-u", str(entry), "--model", runtime.model, *common]
+
+
 def build_run_specs(
     *,
     batch_summary: dict[str, Any],
@@ -169,28 +244,51 @@ def build_run_specs(
     streaming_contract: Path | None,
 ) -> list[dict[str, Any]]:
     require_execution_guard(mode)
-    schedule = load_schedule(schedule_path, require_equal_data=(track == "equal_data"))
+    # Equal-wall uses the same materialized 4,800-reference file as a verified
+    # prefix/seed anchor, then continues the canonical counter stream beyond it.
+    schedule = load_schedule(schedule_path, require_equal_data=True)
     if schedule.get("selected_episode_ids_sha256") != D10_HASH:
         raise ValueError("schedule D10 mismatch")
+    seed = int(schedule.get("seed", -1))
+    if seed not in SEEDS:
+        raise ValueError(f"unexpected M3 schedule seed: {seed}")
     batches = validate_batch_probe_summary(batch_summary)
     runtimes = default_runtimes(root, repo)
     specs: list[dict[str, Any]] = []
     for sequence_index, model in enumerate(ORDERS[order]):
         runtime = runtimes[model]
-        out = Path(output_root) / order / track / model / "train_result.json"
-        cmd = build_adapter_command(
-            runtime=runtime,
-            batch_cfg=batches[model],
-            schedule_path=schedule_path,
-            batch_summary_path=batch_summary_path,
-            dataset_root=dataset_root,
-            manifest_path=manifest_path,
-            track=track,
-            order=order,
-            mode=mode,
-            out=out,
-            streaming_contract=streaming_contract,
-        )
+        run_root = Path(output_root) / order / track / f"seed-{seed}" / model
+        result_out = run_root / "train_result.json"
+        output_dir = run_root / "checkpoint"
+        if mode == "preflight":
+            cmd = build_adapter_command(
+                runtime=runtime,
+                batch_cfg=batches[model],
+                schedule_path=schedule_path,
+                batch_summary_path=batch_summary_path,
+                dataset_root=dataset_root,
+                manifest_path=manifest_path,
+                track=track,
+                order=order,
+                mode=mode,
+                out=result_out,
+                streaming_contract=streaming_contract,
+            )
+        else:
+            cmd = build_training_command(
+                runtime=runtime,
+                repo=repo,
+                batch_cfg=batches[model],
+                schedule_path=schedule_path,
+                dataset_root=dataset_root,
+                manifest_path=manifest_path,
+                track=track,
+                order=order,
+                mode=mode,
+                output_dir=output_dir,
+                result_out=result_out,
+                streaming_contract=streaming_contract,
+            )
         specs.append(
             {
                 "sequence_index": sequence_index,
@@ -200,14 +298,17 @@ def build_run_specs(
                 "mode": mode,
                 "source_ref": runtime.source_ref,
                 "runtime": asdict(runtime),
+                "sampling_seed": seed,
                 "micro_batch": int(batches[model]["micro_batch"]),
                 "gradient_accumulation": int(batches[model]["gradient_accumulation"]),
                 "effective_batch_size": 32,
                 "sample_budget": EQUAL_DATA_BUDGET if track == "equal_data" else None,
                 "train_loop_sec": EQUAL_WALL_SEC if track == "equal_wall" else None,
                 "sampling_schedule_sha256": schedule.get("schedule_sha256"),
+                "equal_wall_stream_continues_after_materialized_prefix": track == "equal_wall",
                 "command": cmd,
-                "out": str(out),
+                "output_dir": str(output_dir),
+                "out": str(result_out),
             }
         )
     return specs
@@ -261,19 +362,27 @@ def main() -> int:
     )
     blockers: list[str] = []
     for runtime in default_runtimes(args.parc_root, args.repo_root).values():
-        blockers.extend(runtime_preflight(runtime, strict_files=args.mode != "preflight"))
+        blockers.extend(
+            runtime_preflight(
+                runtime,
+                repo=args.repo_root,
+                strict_files=args.mode != "preflight",
+            )
+        )
     plan = {
-        "schema_version": 1,
+        "schema_version": 2,
         "stage": "M3_model_adapter_plan",
         "status": "READY_FOR_EXECUTION" if not blockers else "BLOCKED",
         "mode": args.mode,
         "track": args.track,
         "order": args.order,
         "selected_episode_ids_sha256": D10_HASH,
+        "sampling_seed": specs[0]["sampling_seed"] if specs else None,
         "execute_guard": {"environment_variable": EXECUTE_ENV, "required_value": EXECUTE_VALUE},
         "blockers": blockers,
         "runs": specs,
         "benchmark_training_started": False,
+        "automatic_full_run": False,
     }
     args.plan_out.parent.mkdir(parents=True, exist_ok=True)
     args.plan_out.write_text(json.dumps(plan, indent=2) + "\n", encoding="utf-8")
