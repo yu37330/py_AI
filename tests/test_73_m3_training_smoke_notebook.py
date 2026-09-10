@@ -2,7 +2,7 @@ import json
 from pathlib import Path
 
 
-PIN = "e26f58679887cdd849ddb6df0f7ee61bd8ebf9ae"
+PIN = "0c93fa956c579cf325d81a2347d813943fe7209b"
 
 
 def test_notebook_73_is_pinned_smoke_only_and_bootstraps_fresh_runtime():

@@ -50,6 +50,17 @@ def to_openvla_rlds_batch(window: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def to_upstream_window(window: dict[str, Any]) -> dict[str, Any]:
+    """Compatibility name used by the scheduled M3 loaders.
+
+    The scheduled loaders operate on the same validated 69c window contract as
+    the sequential streaming adapter, so their upstream conversion is exactly
+    `to_openvla_rlds_batch`. Keeping the alias here makes that contract explicit
+    and prevents the scheduled path from drifting to a second conversion.
+    """
+    return to_openvla_rlds_batch(window)
+
+
 def iter_transformed_openvla_samples(
     source_root: Path,
     manifest: dict[str, Any],

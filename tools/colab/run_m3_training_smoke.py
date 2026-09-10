@@ -114,17 +114,24 @@ def _validate_result(path: Path, *, order: str, track: str, model: str) -> dict[
     return result
 
 
-def _execute_training_plan(plan_path: Path) -> None:
+def _execute_training_plan(plan_path: Path, *, completed_models: set[str] | None = None) -> None:
     plan = _load_json(plan_path)
     if plan.get("status") != "READY_FOR_EXECUTION" or plan.get("mode") != "smoke":
         raise RuntimeError(f"invalid M3 smoke plan: {plan_path}")
     runs = plan.get("runs")
     if not isinstance(runs, list) or len(runs) != 3:
         raise RuntimeError(f"M3 smoke plan must contain three model runs: {plan_path}")
+    completed = set(completed_models or ())
     env = os.environ.copy()
     env.setdefault("WANDB_DISABLED", "true")
     env.setdefault("WANDB_MODE", "disabled")
     for run in runs:
+        model = str(run.get("model") or "")
+        if model not in MODELS:
+            raise RuntimeError(f"unexpected model in M3 smoke plan: {model!r}")
+        if model in completed:
+            print(f"reuse validated completed smoke: model={model} plan={plan_path.name}", flush=True)
+            continue
         command = run.get("command")
         if not isinstance(command, list) or not command:
             raise RuntimeError(f"missing training command in plan: {plan_path}")
@@ -208,26 +215,43 @@ def main() -> int:
     for order in ORDERS:
         for track in TRACKS:
             plan = plan_root / f"seed-{TRAINING_SCHEDULE_SEED}_{order}_{track}.json"
+            run_root = output_root / order / track / f"seed-{TRAINING_SCHEDULE_SEED}"
             expected_paths = {
-                model: output_root / order / track / f"seed-{TRAINING_SCHEDULE_SEED}" / model / "train_result.json"
+                model: run_root / model / "train_result.json"
                 for model in MODELS
             }
-            if all(path.is_file() for path in expected_paths.values()):
-                for model, path in expected_paths.items():
-                    results.append(_validate_result(path, order=order, track=track, model=model))
+
+            completed_results: dict[str, dict[str, Any]] = {}
+            for model, path in expected_paths.items():
+                if path.is_file():
+                    completed_results[model] = _validate_result(
+                        path, order=order, track=track, model=model
+                    )
+
+            if len(completed_results) == len(MODELS):
+                results.extend(completed_results[model] for model in MODELS)
                 print(f"skip completed smoke: order={order} track={track}", flush=True)
                 continue
-            run_root = output_root / order / track / f"seed-{TRAINING_SCHEDULE_SEED}"
-            if run_root.exists():
-                if not _has_partial_payload(run_root):
-                    print(f"prune empty partial smoke scaffolding: {run_root}", flush=True)
-                    shutil.rmtree(run_root)
-                elif not reset:
-                    raise RuntimeError(
-                        f"partial smoke output exists: {run_root}; set PARC_M3_SMOKE_RESET=1 to reset only this smoke run"
-                    )
-                else:
-                    shutil.rmtree(run_root)
+
+            if run_root.exists() and reset:
+                print(f"explicit reset partial smoke: {run_root}", flush=True)
+                shutil.rmtree(run_root)
+                completed_results.clear()
+            elif run_root.exists():
+                for model in MODELS:
+                    if model in completed_results:
+                        continue
+                    model_root = run_root / model
+                    if not model_root.exists():
+                        continue
+                    if not _has_partial_payload(model_root):
+                        print(f"prune empty partial smoke scaffolding: {model_root}", flush=True)
+                        shutil.rmtree(model_root)
+                    else:
+                        raise RuntimeError(
+                            f"partial smoke output exists for incomplete model: {model_root}; "
+                            "set PARC_M3_SMOKE_RESET=1 to reset this order/track"
+                        )
 
             cmd = [
                 sys.executable,
@@ -259,7 +283,7 @@ def main() -> int:
                 str(plan),
             ]
             subprocess.run(cmd, cwd=str(repo), check=True, env=os.environ.copy())
-            _execute_training_plan(plan)
+            _execute_training_plan(plan, completed_models=set(completed_results))
             for model, path in expected_paths.items():
                 results.append(_validate_result(path, order=order, track=track, model=model))
 
@@ -294,6 +318,7 @@ def main() -> int:
         "models": list(MODELS),
         "equal_data_schedule_sha256": payload["schedule_sha256"],
         "forward_reverse_reuse_same_schedule": True,
+        "validated_partial_resume_supported": True,
         "openvla_smoke_merged_checkpoint_materialized": False,
         "openvla_merge_deferred_to_evaluation": True,
         "result_count": expected_count,
