@@ -34,8 +34,19 @@ class ActiveRuntime:
     sampler: CanonicalReferenceSampler
     evidence: M3ScheduleEvidence
     evidence_path: Path
+    _vram_reset: bool = False
 
     def before_batch_fetch(self) -> None:
+        if self.evidence.started_at is None and not self._vram_reset:
+            try:
+                import torch
+
+                if torch.cuda.is_available():
+                    torch.cuda.reset_peak_memory_stats()
+            except Exception:
+                # VRAM is supplemental evidence; the canonical sample/time gate remains authoritative.
+                pass
+            self._vram_reset = True
         self.evidence.before_first_batch_fetch()
 
     def observe_raw_batch(self, batch: dict[str, Any]) -> None:
@@ -43,6 +54,16 @@ class ActiveRuntime:
 
     def optimizer_boundary(self, *, sync_gradients: bool) -> bool:
         return self.evidence.optimizer_boundary(sync_gradients=bool(sync_gradients))
+
+    def _peak_train_vram_mib(self) -> int:
+        try:
+            import torch
+
+            if torch.cuda.is_available():
+                return int(torch.cuda.max_memory_allocated() / (1024**2))
+        except Exception:
+            pass
+        return 0
 
     def finalize(self) -> dict[str, Any]:
         payload = self.evidence.finalize()
@@ -57,6 +78,8 @@ class ActiveRuntime:
                 "seed": int(self.spec["seed"]),
                 "schedule_sha256": self.spec["schedule_sha256"],
                 "result_path": self.spec["result_path"],
+                "peak_train_vram_mib": self._peak_train_vram_mib(),
+                "vram_scope": "train_loop_from_first_batch_fetch",
             }
         )
         self.evidence_path.parent.mkdir(parents=True, exist_ok=True)
@@ -91,9 +114,6 @@ def _equal_wall_refs(spec: dict[str, Any]) -> tuple[Iterator[dict[str, Any]], in
         seed=int(spec["seed"]),
         start_index=0,
     )
-    # DataLoader/Accelerate may query sampler length even though equal-wall is a
-    # time-bounded stream. One billion references is a non-materialized practical
-    # infinity for a single-A100 screening run.
     return refs, 1_000_000_000
 
 
