@@ -1,5 +1,5 @@
 {
-  "schema_version": 3,
+  "schema_version": 4,
   "stage": "M3_LIBERO_simulator_executor",
   "status": "IMPLEMENTED_PENDING_A100_SMOKE",
   "canonical_live_entry": "tools/benchmark/run_m3_libero_evaluation.py",
@@ -43,10 +43,11 @@
       "episode_entry": "tools/benchmark/m3_openvla_eval_entry.py",
       "persistent_checkpoint_form": "lora_components_and_d10_stats",
       "checkpoint_must_be_merged_for_upstream_evaluator": true,
-      "jit_merge_before_evaluation": true,
+      "jit_merge_before_evaluation_when_needed": true,
       "default_dematerialize_merged_weights_after_evaluation": true,
+      "default_cleanup_applies_even_if_weights_were_merged_before_wrapper": true,
       "keep_merged_opt_in_environment_variable": "PARC_M3_KEEP_MERGED_OPENVLA",
-      "keep_merged_required_only_when_next_stage_needs_eval_ready_artifact": true,
+      "final_selected_candidate_must_keep_merged_until_artifact_freeze": true,
       "checkpoint_must_expose_global_D10_normalization_under_all_four_suite_keys": true,
       "silent_upstream_episode_errors_are_fatal": true,
       "replay_video_encoding_disabled": true
@@ -56,13 +57,16 @@
     "requires_training_adapter_tools_from_pr_66": true,
     "finalizer": "tools/benchmark/m3_openvla_finalize_checkpoint.py",
     "dematerializer": "tools/benchmark/m3_openvla_dematerialize_checkpoint.py",
-    "materialize_only_immediately_before_evaluation": true,
+    "materialize_only_for_evaluation_or_final_freeze": true,
+    "intermediate_evaluation_always_dematerializes_without_keep_opt_in": true,
+    "cleanup_does_not_depend_on_which_stage_created_merged_weights": true,
     "remove_only_merged_model_weights_after_evaluation": true,
     "preserve_lora_adapter": true,
     "preserve_action_head": true,
     "preserve_proprio_projector": true,
     "preserve_d10_statistics": true,
     "cleanup_runs_in_finally_on_evaluator_failure": true,
+    "final_candidate_keep_rule": "set PARC_M3_KEEP_MERGED_OPENVLA=1 for the final selected OpenVLA 800-episode evaluation and keep that one evaluator-ready artifact through freeze",
     "automatic_upload": false
   },
   "instrumentation": {
