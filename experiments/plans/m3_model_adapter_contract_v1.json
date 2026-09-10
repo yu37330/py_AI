@@ -1,10 +1,11 @@
 {
-  "schema_version": 1,
-  "stage": "M3_model_adapter_handoff",
-  "status": "FROZEN_PRE_EXECUTION",
+  "schema_version": 2,
+  "stage": "M3_model_adapter_execution",
+  "status": "IMPLEMENTED_PENDING_A100_SMOKE",
   "selected_dataset_variant": "V2_SQRT_BALANCED_RAW",
   "selected_episode_ids_sha256": "73ed0d3b0c5e73c745c0aa2e81517ce1fa40240c75f9eb040d65b6876ba08239",
   "models": ["pi05", "smolvla", "openvla_oft"],
+  "seed_set": [20260906, 20260907],
   "batch_config_source": "m3_batch_probe_summary.json",
   "batch_values_are_late_bound": true,
   "effective_batch_size": 32,
@@ -12,33 +13,52 @@
     "policy": "uniform_selected_frames_with_replacement_v1",
     "canonical_schedule_required": true,
     "native_random_sampler_allowed": false,
-    "forward_reverse_reuse_same_schedule_hash": true
+    "forward_reverse_reuse_same_schedule_hash": true,
+    "equal_wall_continues_counter_stream_after_materialized_4800_prefix": true,
+    "equal_wall_does_not_cycle_4800_prefix": true
   },
   "tracks": {
     "equal_data": {
       "sample_budget": 4800,
-      "zero_overshoot": true
+      "optimizer_updates": 150,
+      "zero_overshoot": true,
+      "checkpoint_io_excluded_from_train_wall_metric": true
     },
     "equal_wall": {
       "train_loop_sec": 1800,
       "stop_only_at_optimizer_boundary": true,
-      "exclude_setup_download_eval": true
+      "timer_starts_immediately_before_first_train_batch_fetch": true,
+      "checkpoint_saved_after_timer_freezes": true,
+      "exclude_setup_download_conversion_eval_checkpoint_io": true,
+      "record_actual_samples_consumed": true
     }
   },
   "execution": {
     "forward": ["pi05", "smolvla", "openvla_oft"],
     "reverse": ["openvla_oft", "smolvla", "pi05"],
+    "outputs_are_seed_scoped": true,
     "smoke_and_benchmark_require": "PARC_M3_EXECUTE=1",
     "automatic_full_run": false
   },
+  "lerobot": {
+    "pi05_equal_data_and_wall_entry": "tools/benchmark/m3_lerobot_train_entry_v2.py",
+    "smolvla_equal_data_and_wall_entry": "tools/benchmark/m3_lerobot_train_entry_v2.py",
+    "fixed_schedule_sampler_injected_before_accelerator_prepare": true,
+    "absolute_to_relative_mapping_required": true
+  },
   "openvla": {
+    "entry": "tools/benchmark/m3_openvla_train_entry.py",
     "bridge": "lerobot_streaming",
     "modified_libero_rlds_allowed": false,
     "full_rlds_materialization": false,
+    "bounded_schedule_decode_chunks": true,
     "image_aug_real_m3": true,
     "num_images_in_input": 2,
     "use_proprio": true,
-    "use_l1_regression": true
+    "use_l1_regression": true,
+    "lora_rank": 32,
+    "learning_rate": 0.0005,
+    "global_D10_normalization_reused_for_all_eval_suites": true
   },
-  "current_gate": "adapter data/runtime handoff may be prepared before 72d; real train loops must use the 72d-selected batch settings and the canonical schedule"
+  "current_gate": "code-complete for guarded smoke/benchmark execution; requires real 72d batch summary and A100 smoke before benchmark launch"
 }
