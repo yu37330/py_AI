@@ -2,7 +2,7 @@ import json
 from pathlib import Path
 
 
-PIN = "a7ad0ac5c4ff5c7b21e904befebc0a9d4610ee0f"
+PIN = "17eccf5074ef8b11e2de7fda82d20a065ba2228d"
 
 
 def test_notebook_73_is_pinned_smoke_only_and_bootstraps_fresh_runtime():
@@ -57,6 +57,7 @@ def test_logged_smoke_wrapper_persists_child_stdout_stderr_without_enabling_benc
         '"benchmark_training_started": False',
         '"full_1800_second_run_started": False',
         "sys.executable",
+        "_prepend_pythonpath(env, repo)",
     ):
         assert token in text
     assert "run_m3_benchmark_order.py" not in text
