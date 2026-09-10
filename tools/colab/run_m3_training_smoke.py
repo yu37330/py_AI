@@ -48,6 +48,16 @@ def _load_json(path: Path) -> dict[str, Any]:
     return data
 
 
+def _has_partial_payload(root: Path) -> bool:
+    """Return True only when a partial smoke tree contains real payload files.
+
+    Empty directory scaffolding can be left behind by a process that failed
+    before training started. It is safe to prune that scaffolding automatically;
+    any file or symlink is treated as evidence and still requires explicit reset.
+    """
+    return any(path.is_file() or path.is_symlink() for path in root.rglob("*"))
+
+
 def _validate_result(path: Path, *, order: str, track: str, model: str) -> dict[str, Any]:
     result = _load_json(path)
     if result.get("status") != "PASS":
@@ -209,11 +219,15 @@ def main() -> int:
                 continue
             run_root = output_root / order / track / f"seed-{TRAINING_SCHEDULE_SEED}"
             if run_root.exists():
-                if not reset:
+                if not _has_partial_payload(run_root):
+                    print(f"prune empty partial smoke scaffolding: {run_root}", flush=True)
+                    shutil.rmtree(run_root)
+                elif not reset:
                     raise RuntimeError(
                         f"partial smoke output exists: {run_root}; set PARC_M3_SMOKE_RESET=1 to reset only this smoke run"
                     )
-                shutil.rmtree(run_root)
+                else:
+                    shutil.rmtree(run_root)
 
             cmd = [
                 sys.executable,
