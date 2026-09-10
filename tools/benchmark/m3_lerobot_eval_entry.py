@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Instrument pinned LeRobot LIBERO evaluation and emit M3 episode records.
 
-The upstream evaluator owns environment/policy preprocessing.  We wrap only its
+The upstream evaluator owns environment/policy preprocessing. We wrap only its
 ``rollout`` function, preserving policy/environment behavior while measuring
 steps, duration, synchronized policy inference latency and peak inference VRAM.
 Evaluation batch size is forced to 1 so one rollout maps unambiguously to one
@@ -20,6 +20,7 @@ import time
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser()
     p.add_argument("--repo-root", type=Path, required=True)
+    p.add_argument("--source-root", type=Path, required=True)
     p.add_argument("--training-result", type=Path, required=True)
     p.add_argument("--model", choices=("pi05", "smolvla"), required=True)
     p.add_argument("--suite", required=True)
@@ -37,13 +38,23 @@ def main() -> int:
         build_episode_record,
         instrument_select_action,
     )
-    from tools.benchmark.m3_libero_executor import validate_training_result  # noqa: PLC0415
+    from tools.benchmark.m3_eval_runtime_guard import validate_runtime  # noqa: PLC0415
+    from tools.benchmark.m3_libero_executor import (  # noqa: PLC0415
+        SEEDS,
+        SUITES,
+        validate_training_result,
+    )
 
     training = validate_training_result(args.training_result)
     if training["model"] != args.model:
         raise ValueError("training-result model mismatch")
+    if args.suite not in SUITES:
+        raise ValueError(f"unexpected LIBERO suite: {args.suite}")
+    if args.seed not in SEEDS:
+        raise ValueError(f"unexpected M3 evaluation seed: {args.seed}")
     if args.episodes <= 0:
         raise ValueError("episodes must be positive")
+    runtime = validate_runtime(args.model, args.source_root)
 
     module = importlib.import_module("lerobot.scripts.lerobot_eval")
     original_rollout = module.rollout
@@ -57,6 +68,8 @@ def main() -> int:
             env = rollout_args[0]
         if policy is None and len(rollout_args) > 1:
             policy = rollout_args[1]
+        if env is None or policy is None:
+            raise RuntimeError("cannot instrument LeRobot rollout without env/policy")
         try:
             descriptions = list(env.call("task_description"))
         except Exception:
@@ -78,7 +91,8 @@ def main() -> int:
             done_row = done[i]
             done_indices = torch.nonzero(done_row, as_tuple=False).flatten()
             steps = int(done_indices[0].item() + 1) if len(done_indices) else int(done_row.shape[0])
-            steps = min(300, steps)
+            if steps > 300:
+                raise RuntimeError(f"LeRobot evaluator exceeded frozen 300-step boundary: {steps}")
             success = bool(success_tensor[i, :steps].any().item())
             actual_seed = None
             if actual_seeds is not None and i < len(actual_seeds):
@@ -98,6 +112,8 @@ def main() -> int:
                 peak_inference_vram_mib=inference.peak_vram_mib,
             )
             record["environment_seed"] = actual_seed
+            record["gpu_name"] = runtime["gpu_name"]
+            record["gpu_vram_mib"] = runtime["gpu_vram_mib"]
             records.append(record)
         return rollout_data
 
@@ -110,6 +126,7 @@ def main() -> int:
         f"--env.task={args.suite}",
         "--env.episode_length=300",
         "--env.init_states=true",
+        "--env.hard_reset=true",
         "--eval.batch_size=1",
         f"--eval.n_episodes={args.episodes}",
         "--env.max_parallel_tasks=1",
@@ -126,16 +143,23 @@ def main() -> int:
         sys.argv = old_argv
         module.rollout = original_rollout
 
-    if not records:
-        raise RuntimeError("upstream LeRobot evaluator produced no instrumented episode records")
+    expected = 10 * args.episodes
+    if len(records) != expected:
+        raise RuntimeError(
+            f"LeRobot episode record count mismatch for {args.suite}: {len(records)} != {expected}"
+        )
     args.records_out.parent.mkdir(parents=True, exist_ok=True)
-    args.records_out.write_text(json.dumps({"episodes": records}, indent=2) + "\n", encoding="utf-8")
+    args.records_out.write_text(
+        json.dumps({"runtime": runtime, "episodes": records}, indent=2) + "\n",
+        encoding="utf-8",
+    )
     print(json.dumps({
         "status": "PASS",
         "model": args.model,
         "suite": args.suite,
         "run_seed": args.seed,
         "episode_count": len(records),
+        "gpu_name": runtime["gpu_name"],
         "records": str(args.records_out),
     }, indent=2))
     return 0
