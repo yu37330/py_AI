@@ -146,6 +146,35 @@ def test_entries_enforce_300_hard_reset_and_instrument_upstream_rollout():
     assert 'validate_runtime("openvla_oft"' in openvla_entry
 
 
+def test_openvla_lifecycle_wrapper_materializes_then_cleans_by_default():
+    root = Path(__file__).resolve().parents[1]
+    wrapper = (root / "tools/benchmark/run_m3_libero_evaluation.py").read_text()
+    for token in (
+        "m3_openvla_finalize_checkpoint.py",
+        "m3_openvla_dematerialize_checkpoint.py",
+        "PARC_M3_KEEP_MERGED_OPENVLA",
+        "materialized_here",
+        "finally:",
+        "openvla_dematerialized_after_evaluation",
+        "automatic_upload",
+    ):
+        assert token in wrapper
+    assert "subprocess.run(finalize_command" in wrapper
+    assert "subprocess.run(\n                cleanup_command" in wrapper
+
+
+def test_lifecycle_wrapper_requires_pr66_tools_in_integrated_tree():
+    root = Path(__file__).resolve().parents[1]
+    wrapper = (root / "tools/benchmark/run_m3_libero_evaluation.py").read_text()
+    assert "requires #54 finalizer to be present" in wrapper
+    assert "requires #54 dematerializer to be present" in wrapper
+    contract = json.loads(
+        (root / "experiments/plans/m3_libero_executor_v1.json").read_text()
+    )
+    assert contract["openvla_storage_lifecycle"]["requires_training_adapter_tools_from_pr_66"] is True
+    assert contract["integration_order"][0].startswith("merge PR #66")
+
+
 def test_instrumentation_scope_is_policy_inference_not_preprocessing():
     root = Path(__file__).resolve().parents[1]
     helper = (root / "tools/benchmark/m3_eval_instrumentation.py").read_text()
@@ -157,20 +186,29 @@ def test_instrumentation_scope_is_policy_inference_not_preprocessing():
     assert "policy inference call only" in contract["instrumentation"]["inference_latency_scope"]
 
 
-def test_executor_contract_records_live_guard_and_full_metric_set():
+def test_executor_contract_records_live_guard_storage_lifecycle_and_metric_set():
     root = Path(__file__).resolve().parents[1]
     contract = json.loads(
         (root / "experiments/plans/m3_libero_executor_v1.json").read_text()
     )
     assert contract["status"] == "IMPLEMENTED_PENDING_A100_SMOKE"
+    assert contract["canonical_live_entry"] == "tools/benchmark/run_m3_libero_evaluation.py"
     assert contract["seed_set"] == list(SEEDS)
     assert contract["max_steps_per_episode"] == 300
     assert contract["evaluation_protocol"]["hard_reset"] is True
     assert contract["evaluation_protocol"]["smoke_episode_records_per_model"] == 80
     assert contract["evaluation_protocol"]["benchmark_episode_records_per_model"] == 800
     assert contract["runtime_gate"]["minimum_gpu_vram_mib"] == 38000
-    assert contract["models"]["openvla_oft"]["silent_upstream_episode_errors_are_fatal"] is True
-    assert contract["models"]["openvla_oft"]["checkpoint_must_be_merged_for_upstream_evaluator"] is True
+    openvla = contract["models"]["openvla_oft"]
+    assert openvla["silent_upstream_episode_errors_are_fatal"] is True
+    assert openvla["jit_merge_before_evaluation"] is True
+    assert openvla["default_dematerialize_merged_weights_after_evaluation"] is True
+    lifecycle = contract["openvla_storage_lifecycle"]
+    assert lifecycle["remove_only_merged_model_weights_after_evaluation"] is True
+    assert lifecycle["preserve_lora_adapter"] is True
+    assert lifecycle["preserve_action_head"] is True
+    assert lifecycle["preserve_proprio_projector"] is True
+    assert lifecycle["preserve_d10_statistics"] is True
     assert contract["evaluation_protocol"]["automatic_full_evaluation"] is False
     assert contract["aggregation"]["required_metrics"] == [
         "simulator_success_rate",
