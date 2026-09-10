@@ -2,10 +2,10 @@
 """Inner single-GPU OpenVLA-OFT trainer for guarded PARC2026 M3 runs.
 
 Run only via `torchrun --nproc-per-node=1` from `run_m3_openvla_oft.py`.
-The outer worker establishes the exact pinned runtime and execution guard.  This
+The outer worker establishes the exact pinned runtime and execution guard. This
 inner loop consumes the framework-independent canonical sample stream directly,
 uses the validated 69c normalization/streaming contract, and saves an unmerged
-LoRA checkpoint after the measured training loop stops.
+LoRA checkpoint only after the measured training loop stops.
 """
 from __future__ import annotations
 
@@ -18,6 +18,11 @@ import random
 import sys
 import time
 from typing import Any, Iterator
+
+D10_VARIANT = "V2_SQRT_BALANCED_RAW"
+D10_HASH = "73ed0d3b0c5e73c745c0aa2e81517ce1fa40240c75f9eb040d65b6876ba08239"
+OPENVLA_REF = "e4287e94541f459edc4feabc4e181f537cd569a8"
+DATASET_NAME = "parc_libero_selected_streaming"
 
 
 def parse_args() -> argparse.Namespace:
@@ -52,13 +57,11 @@ def _validate_runtime(runtime: dict[str, Any]) -> None:
     ga = int(runtime.get("gradient_accumulation", 0))
     if bs <= 0 or ga <= 0 or bs * ga != 32:
         raise ValueError(f"OpenVLA effective batch drift: bs={bs} ga={ga}")
-    if runtime.get("selected_dataset_variant") != "V2_SQRT_BALANCED_RAW":
+    if runtime.get("selected_dataset_variant") != D10_VARIANT:
         raise ValueError("OpenVLA runtime dataset variant mismatch")
-    if runtime.get("selected_episode_ids_sha256") != (
-        "73ed0d3b0c5e73c745c0aa2e81517ce1fa40240c75f9eb040d65b6876ba08239"
-    ):
+    if runtime.get("selected_episode_ids_sha256") != D10_HASH:
         raise ValueError("OpenVLA runtime D10 hash mismatch")
-    if runtime.get("source_ref") != "e4287e94541f459edc4feabc4e181f537cd569a8":
+    if runtime.get("source_ref") != OPENVLA_REF:
         raise ValueError("OpenVLA runtime source pin mismatch")
     if runtime.get("execution_guard_verified") is not True:
         raise RuntimeError("OpenVLA runtime execution guard was not verified")
@@ -166,15 +169,17 @@ def main() -> int:
     contract = json.loads(args.streaming_contract.read_text(encoding="utf-8"))
     if contract.get("status") != "PASS" or contract.get("bridge_type") != "lerobot_streaming":
         raise RuntimeError("69c streaming contract is not PASS")
-    if contract.get("source_episode_ids_sha256") != runtime["selected_episode_ids_sha256"]:
+    if contract.get("source_episode_ids_sha256") != D10_HASH:
         raise RuntimeError("69c contract D10 hash mismatch")
-    if contract.get("openvla_oft_revision") != runtime["source_ref"]:
+    if contract.get("openvla_oft_revision") != OPENVLA_REF:
         raise RuntimeError("69c OpenVLA source revision mismatch")
     if contract.get("storage_policy", {}).get("full_rlds_materialized") is not False:
         raise RuntimeError("M3 OpenVLA worker refuses a full-RLDS materialization contract")
     statistics = contract.get("dataset_statistics")
     if not isinstance(statistics, dict) or int(statistics.get("num_transitions", 0)) != 1620614:
         raise RuntimeError("69c contract lacks exact selected-pool statistics")
+    if not isinstance(statistics.get("action"), dict) or not isinstance(statistics.get("proprio"), dict):
+        raise RuntimeError("69c contract lacks action/proprio statistics")
     manifest = load_manifest(Path(runtime["manifest_path"]))
 
     seed = int(runtime["seed"])
@@ -295,6 +300,8 @@ def main() -> int:
                         f"OpenVLA equal-data overshoot blocked: {samples_consumed}+{bs}>{target}"
                     )
             if started is None:
+                # Training-loop accounting begins immediately before the first
+                # actual canonical batch fetch. Model/source setup is excluded.
                 torch.cuda.reset_peak_memory_stats(device_id)
                 started = time.perf_counter()
             refs = _take_refs(refs_iter, bs)
@@ -359,8 +366,7 @@ def main() -> int:
             elif optimizer_updates >= optimizer_target:
                 raise RuntimeError("OpenVLA optimizer target reached before equal-data sample target")
         else:
-            wall_target = float(runtime["train_loop_sec"])
-            if elapsed >= wall_target:
+            if elapsed >= float(runtime["train_loop_sec"]):
                 stop = True
 
         if stop:
@@ -375,6 +381,8 @@ def main() -> int:
     peak_mib = int(torch.cuda.max_memory_allocated(device_id) / (1024**2))
     dist.barrier()
 
+    # Checkpoint I/O happens only after the timer has stopped and is excluded
+    # from the equal-wall measurement by contract.
     checkpoint_dir = args.checkpoint_dir.resolve()
     if state.is_main_process:
         checkpoint_dir.mkdir(parents=True, exist_ok=True)
@@ -390,13 +398,17 @@ def main() -> int:
             action_head.state_dict(),
             checkpoint_dir / "action_head--latest_checkpoint.pt",
         )
-        save_dataset_statistics(statistics, checkpoint_dir)
+        # Upstream save_dataset_statistics expects dataset-name -> stats, while
+        # the validated 69c contract stores the single selected-pool stats body.
+        # Wrap it here without recomputing or changing any values.
+        save_dataset_statistics({DATASET_NAME: statistics}, checkpoint_dir)
         checkpoint_manifest = {
             "schema_version": 1,
             "stage": "M3_openvla_oft_checkpoint",
             "status": "PASS",
-            "source_ref": runtime["source_ref"],
+            "source_ref": OPENVLA_REF,
             "base_checkpoint": "openvla/openvla-7b",
+            "dataset_name": DATASET_NAME,
             "lora_rank": 32,
             "use_l1_regression": True,
             "use_proprio": True,
@@ -421,9 +433,9 @@ def main() -> int:
         "order": runtime["order"],
         "track": runtime["track"],
         "seed": seed,
-        "source_ref": runtime["source_ref"],
-        "selected_dataset_variant": runtime["selected_dataset_variant"],
-        "selected_episode_ids_sha256": runtime["selected_episode_ids_sha256"],
+        "source_ref": OPENVLA_REF,
+        "selected_dataset_variant": D10_VARIANT,
+        "selected_episode_ids_sha256": D10_HASH,
         "sampling_schedule_sha256": runtime["schedule_sha256"],
         "micro_batch": bs,
         "gradient_accumulation": ga,
@@ -441,6 +453,7 @@ def main() -> int:
         "final_loss": losses[-1] if losses else None,
         "mean_last20_loss": sum(losses[-20:]) / len(losses[-20:]) if losses else None,
         "checkpoint": str(checkpoint_dir),
+        "checkpoint_io_excluded_from_train_wall": True,
         "full_rlds_materialized": False,
     }
     if state.is_main_process:
