@@ -100,6 +100,8 @@ def runtime_preflight(
             else Path(repo) / "tools/benchmark/m3_lerobot_train_entry_v2.py"
         )
         items.append(("train_entry", str(entry)))
+        if runtime.model == "openvla_oft":
+            items.append(("checkpoint_finalizer", str(Path(repo) / "tools/benchmark/m3_openvla_finalize_checkpoint.py")))
     for label, raw in items:
         p = Path(raw)
         if strict_files and not p.exists():
@@ -228,6 +230,24 @@ def build_training_command(
     return [runtime.python, "-u", str(entry), "--model", runtime.model, *common]
 
 
+def build_post_training_command(
+    *, runtime: AdapterRuntime, repo: Path, output_dir: Path, result_out: Path
+) -> list[str] | None:
+    if runtime.model != "openvla_oft":
+        return None
+    return [
+        runtime.python,
+        "-u",
+        str(Path(repo) / "tools/benchmark/m3_openvla_finalize_checkpoint.py"),
+        "--source-root",
+        runtime.source_root,
+        "--checkpoint-root",
+        str(output_dir),
+        "--result",
+        str(result_out),
+    ]
+
+
 def build_run_specs(
     *,
     batch_summary: dict[str, Any],
@@ -244,8 +264,6 @@ def build_run_specs(
     streaming_contract: Path | None,
 ) -> list[dict[str, Any]]:
     require_execution_guard(mode)
-    # Equal-wall uses the same materialized 4,800-reference file as a verified
-    # prefix/seed anchor, then continues the canonical counter stream beyond it.
     schedule = load_schedule(schedule_path, require_equal_data=True)
     if schedule.get("selected_episode_ids_sha256") != D10_HASH:
         raise ValueError("schedule D10 mismatch")
@@ -274,6 +292,7 @@ def build_run_specs(
                 out=result_out,
                 streaming_contract=streaming_contract,
             )
+            post_cmd = None
         else:
             cmd = build_training_command(
                 runtime=runtime,
@@ -288,6 +307,12 @@ def build_run_specs(
                 output_dir=output_dir,
                 result_out=result_out,
                 streaming_contract=streaming_contract,
+            )
+            post_cmd = build_post_training_command(
+                runtime=runtime,
+                repo=repo,
+                output_dir=output_dir,
+                result_out=result_out,
             )
         specs.append(
             {
@@ -307,6 +332,8 @@ def build_run_specs(
                 "sampling_schedule_sha256": schedule.get("schedule_sha256"),
                 "equal_wall_stream_continues_after_materialized_prefix": track == "equal_wall",
                 "command": cmd,
+                "post_training_command": post_cmd,
+                "post_training_work_excluded_from_train_wall_time": post_cmd is not None,
                 "output_dir": str(output_dir),
                 "out": str(result_out),
             }
@@ -323,6 +350,17 @@ def execute_specs(specs: list[dict[str, Any]], *, mode: str) -> None:
     env.setdefault("WANDB_MODE", "disabled")
     for spec in specs:
         subprocess.run(spec["command"], check=True, env=env)
+        post_command = spec.get("post_training_command")
+        if post_command:
+            subprocess.run(post_command, check=True, env=env)
+        result_path = Path(spec["out"])
+        if not result_path.is_file():
+            raise RuntimeError(f"M3 training result missing: {result_path}")
+        result = json.loads(result_path.read_text(encoding="utf-8"))
+        if result.get("status") != "PASS":
+            raise RuntimeError(f"M3 training result is not PASS: {result_path}")
+        if spec["model"] == "openvla_oft" and result.get("checkpoint_eval_ready") is not True:
+            raise RuntimeError("OpenVLA checkpoint finalizer did not produce an eval-ready checkpoint")
 
 
 def _parse_args() -> argparse.Namespace:
@@ -370,7 +408,7 @@ def main() -> int:
             )
         )
     plan = {
-        "schema_version": 2,
+        "schema_version": 3,
         "stage": "M3_model_adapter_plan",
         "status": "READY_FOR_EXECUTION" if not blockers else "BLOCKED",
         "mode": args.mode,
