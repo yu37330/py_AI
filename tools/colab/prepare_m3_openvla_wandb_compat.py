@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Prepare the pinned OpenVLA-OFT probe environment with a protobuf-compatible W&B runtime."""
+"""Prepare the pinned OpenVLA-OFT probe runtime for W&B and streaming data access."""
 from __future__ import annotations
 
 import importlib
@@ -9,6 +9,9 @@ import sys
 
 WANDB_VERSION = "0.16.6"
 PROTOBUF_VERSION = "3.20.3"
+PANDAS_VERSION = "2.2.3"
+PYARROW_VERSION = "17.0.0"
+AV_VERSION = "12.3.0"
 
 
 def main() -> int:
@@ -45,31 +48,63 @@ def main() -> int:
         setup_log=setup_log,
     )
 
+    # The validated 69c streaming adapter reads LeRobot metadata/parquet/video
+    # directly. OpenVLA-OFT itself does not depend on pandas/pyarrow/PyAV, so
+    # these packages must be added explicitly to the isolated training venv.
+    # Pin 2024-era versions to avoid another dependency drift during submission.
+    probe._run_stage(
+        "pin_streaming_data_runtime",
+        [
+            "uv",
+            "pip",
+            "install",
+            "--python",
+            str(python_bin),
+            f"pandas=={PANDAS_VERSION}",
+            f"pyarrow=={PYARROW_VERSION}",
+            f"av=={AV_VERSION}",
+        ],
+        status_path=status_path,
+        setup_log=setup_log,
+    )
+
     check = probe._run_stage(
-        "verify_wandb_compat",
+        "verify_wandb_streaming_compat",
         [
             str(python_bin),
             "-c",
             (
-                "import importlib.metadata as im; import wandb; "
+                "import importlib.metadata as im; "
+                "import wandb, pandas, pyarrow, av; "
                 "print('wandb=' + im.version('wandb')); "
                 "print('protobuf=' + im.version('protobuf')); "
-                "print('wandb_import_ok')"
+                "print('pandas=' + im.version('pandas')); "
+                "print('pyarrow=' + im.version('pyarrow')); "
+                "print('av=' + im.version('av')); "
+                "print('wandb_streaming_import_ok')"
             ),
         ],
         status_path=status_path,
         setup_log=setup_log,
     ).strip().splitlines()
 
-    if f"wandb={WANDB_VERSION}" not in check:
-        raise RuntimeError(f"wandb pin mismatch: {check}")
-    if f"protobuf={PROTOBUF_VERSION}" not in check:
-        raise RuntimeError(f"protobuf pin mismatch after wandb repair: {check}")
-    if "wandb_import_ok" not in check:
-        raise RuntimeError(f"wandb import verification failed: {check}")
+    expected = {
+        "wandb": WANDB_VERSION,
+        "protobuf": PROTOBUF_VERSION,
+        "pandas": PANDAS_VERSION,
+        "pyarrow": PYARROW_VERSION,
+        "av": AV_VERSION,
+    }
+    for package, version in expected.items():
+        if f"{package}={version}" not in check:
+            raise RuntimeError(f"{package} pin mismatch: {check}")
+    if "wandb_streaming_import_ok" not in check:
+        raise RuntimeError(f"W&B/streaming import verification failed: {check}")
 
     print(
-        f"72c W&B compatibility ready: wandb={WANDB_VERSION} protobuf={PROTOBUF_VERSION}",
+        "72c runtime compatibility ready: "
+        f"wandb={WANDB_VERSION} protobuf={PROTOBUF_VERSION} "
+        f"pandas={PANDAS_VERSION} pyarrow={PYARROW_VERSION} av={AV_VERSION}",
         flush=True,
     )
     return 0
