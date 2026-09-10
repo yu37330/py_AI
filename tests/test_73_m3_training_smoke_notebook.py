@@ -2,7 +2,7 @@ import json
 from pathlib import Path
 
 
-PIN = "2dae9fbfa510d0a4bf860c93f0376b673a0c8042"
+PIN = "a7ad0ac5c4ff5c7b21e904befebc0a9d4610ee0f"
 
 
 def test_notebook_73_is_pinned_smoke_only_and_bootstraps_fresh_runtime():
@@ -15,9 +15,12 @@ def test_notebook_73_is_pinned_smoke_only_and_bootstraps_fresh_runtime():
     )
     assert PIN in code
     assert "prepare_m3_training_runtimes.py" in code
-    assert "run_m3_training_smoke.py" in code
+    assert "run_m3_training_smoke_logged.py" in code
+    assert "venv-openvla-oft-m3/bin/python" in code
     assert "PARC_M3_EXECUTE" in code
     assert "RUNTIME SETUP LOG TAIL" in code
+    assert "ORCHESTRATOR STATUS" in code
+    assert "ORCHESTRATOR LOG TAIL" in code
     assert "LATEST SMOKE PLAN" in code
     assert "LATEST TRAIN RESULT" in code
     assert "--mode', 'benchmark" not in code
@@ -41,6 +44,22 @@ def test_runtime_setup_rebuilds_ephemeral_colab_dependencies_without_probes():
     assert "run_m3_pi05_batch_probe.py" not in text
     assert "run_m3_smolvla_batch_probe.py" not in text
     assert "run_m3_openvla_batch_probe.py" not in text
+
+
+def test_logged_smoke_wrapper_persists_child_stdout_stderr_without_enabling_benchmark():
+    root = Path(__file__).resolve().parents[1]
+    text = (root / "tools/colab/run_m3_training_smoke_logged.py").read_text()
+    for token in (
+        "run_m3_training_smoke.py",
+        "stderr=subprocess.STDOUT",
+        "orchestrator.log",
+        "orchestrator_status.json",
+        '"benchmark_training_started": False',
+        '"full_1800_second_run_started": False',
+        "sys.executable",
+    ):
+        assert token in text
+    assert "run_m3_benchmark_order.py" not in text
 
 
 def test_training_smoke_reuses_one_schedule_for_forward_reverse():
