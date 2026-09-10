@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Runtime hook consumed by exact-revision LeRobot M3 trainer patches.
 
-The patched trainers only call the small ActiveRuntime API below.  All D10
+The patched trainers only call the small ActiveRuntime API below. All D10
 schedule validation and actual raw-batch evidence lives here so π0.5 and
 SmolVLA share identical sample-order semantics.
 """
@@ -17,6 +17,7 @@ from tools.benchmark.m3_lerobot_schedule_runtime import (
     CanonicalReferenceSampler,
     M3ScheduleEvidence,
 )
+from tools.benchmark.m3_runner_core import EQUAL_DATA_BUDGET, EQUAL_DATA_OPTIMIZER_UPDATES
 from tools.benchmark.m3_sampling_schedule import (
     iter_references,
     load_d10_episode_lengths,
@@ -50,6 +51,7 @@ class ActiveRuntime:
                 "schema_version": 1,
                 "stage": "M3_lerobot_runtime_evidence",
                 "status": "PASS",
+                "mode": self.spec["mode"],
                 "model": self.spec["model"],
                 "order": self.spec["order"],
                 "seed": int(self.spec["seed"]),
@@ -69,8 +71,11 @@ def _equal_data_refs(spec: dict[str, Any]) -> tuple[Iterator[dict[str, Any]], in
         raise ValueError("runtime equal-data schedule SHA does not match run spec")
     if int(schedule["seed"]) != int(spec["seed"]):
         raise ValueError("runtime equal-data seed mismatch")
+    target = int(spec["sample_target"])
+    if not 0 < target <= len(schedule["references"]):
+        raise ValueError("equal-data runtime sample target exceeds canonical schedule")
     refs = schedule["references"]
-    return iter(refs), len(refs)
+    return iter(refs), target
 
 
 def _equal_wall_refs(spec: dict[str, Any]) -> tuple[Iterator[dict[str, Any]], int]:
@@ -88,13 +93,14 @@ def _equal_wall_refs(spec: dict[str, Any]) -> tuple[Iterator[dict[str, Any]], in
     )
     # DataLoader/Accelerate may query sampler length even though equal-wall is a
     # time-bounded stream. One billion references is a non-materialized practical
-    # infinity for a 30-minute single-A100 screening run.
+    # infinity for a single-A100 screening run.
     return refs, 1_000_000_000
 
 
 def load_runtime_spec(path: Path) -> dict[str, Any]:
     data = json.loads(Path(path).read_text(encoding="utf-8"))
     required = {
+        "mode",
         "model",
         "order",
         "track",
@@ -107,10 +113,14 @@ def load_runtime_spec(path: Path) -> dict[str, Any]:
         "dataset_root",
         "result_path",
         "evidence_path",
+        "sample_target",
+        "optimizer_target",
     }
     missing = sorted(required - set(data))
     if missing:
         raise ValueError(f"M3 runtime spec missing fields: {missing}")
+    if data["mode"] not in {"smoke", "benchmark"}:
+        raise ValueError("M3 runtime mode must be smoke or benchmark")
     if data["model"] not in {"pi05", "smolvla"}:
         raise ValueError(f"LeRobot runtime cannot serve model {data['model']}")
     if data["order"] not in {"forward", "reverse"}:
@@ -123,6 +133,15 @@ def load_runtime_spec(path: Path) -> dict[str, Any]:
         raise ValueError("M3 micro-batch/GA mismatch")
     if data["track"] == "equal_data" and not data.get("equal_data_schedule"):
         raise ValueError("equal-data runtime requires the materialized canonical schedule")
+
+    sample_target = int(data["sample_target"])
+    optimizer_target = int(data["optimizer_target"])
+    if data["mode"] == "benchmark" and data["track"] == "equal_data":
+        if sample_target != EQUAL_DATA_BUDGET or optimizer_target != EQUAL_DATA_OPTIMIZER_UPDATES:
+            raise ValueError("benchmark equal-data target must remain exactly 4800/150")
+    if data["mode"] == "benchmark" and data["track"] == "equal_wall":
+        if float(data.get("train_loop_sec") or 0.0) != 1800.0:
+            raise ValueError("benchmark equal-wall target must remain exactly 1800 sec")
     return data
 
 
@@ -149,6 +168,8 @@ def setup_runtime(dataset: Any, spec_path: str | Path | None = None) -> ActiveRu
         gradient_accumulation=int(spec["gradient_accumulation"]),
         expected_references=refs_for_evidence,
         wall_target_sec=float(spec.get("train_loop_sec") or 1800.0),
+        sample_target=int(spec["sample_target"]),
+        optimizer_target=int(spec["optimizer_target"]),
     )
     _ACTIVE = ActiveRuntime(
         spec=spec,
