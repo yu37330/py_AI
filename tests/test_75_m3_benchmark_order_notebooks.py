@@ -3,7 +3,7 @@ import json
 from pathlib import Path
 
 
-PIN = "27b1735d882dc0bdd8ae4d2ca84d93df27b6dc73"
+PIN = "b5c2d150ba8d361ca22da874677827f8924f41fc"
 
 
 def _code(root: Path, name: str) -> str:
