@@ -80,6 +80,7 @@ def _validate_training_result(
         "sampling_seed": TRAINING_SCHEDULE_SEED,
         "source_ref": expected_source_ref,
         "effective_batch_size": EFFECTIVE_BATCH,
+        "benchmark_training_started": True,
     }
     for key, value in expected.items():
         if result.get(key) != value:
@@ -223,7 +224,7 @@ def main() -> int:
     contract = _load(streaming_contract)
     if contract.get("status") != "PASS" or contract.get("bridge_type") != "lerobot_streaming":
         raise RuntimeError("69c streaming contract is not PASS lerobot_streaming")
-    if contract.get("selected_episode_ids_sha256") != D10_HASH:
+    if contract.get("source_episode_ids_sha256") != D10_HASH:
         raise RuntimeError("69c streaming D10 mismatch")
 
     runtimes = default_runtimes(parc_root, repo)
