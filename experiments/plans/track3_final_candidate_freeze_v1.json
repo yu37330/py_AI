@@ -1,5 +1,5 @@
 {
-  "schema_version": 3,
+  "schema_version": 4,
   "stage": "Track3_final_candidate_freeze",
   "status": "IMPLEMENTED_PENDING_REAL_M3_EVIDENCE",
   "deadline_jst": "2026-09-17T23:59:00+09:00",
@@ -22,8 +22,10 @@
   },
   "final_run": {
     "prepare_entry": "tools/submission/prepare_track3_final_run.py",
+    "execution_entry": "tools/submission/run_track3_final_candidate.py",
     "training_result_link_entry": "tools/submission/link_track3_final_training_result.py",
     "canonical_freeze_entry": "tools/submission/finalize_track3_submission.py",
+    "requires_integrated_m3_training_adapters_from_pr_66": true,
     "source_ref_must_match_promotion_registry_and_recipe": true,
     "recipe_file_sha256_frozen_before_run": true,
     "promotion_summary_sha256_frozen_before_run": true,
@@ -33,10 +35,14 @@
     "equal_data_optimizer_updates": 150,
     "equal_wall_train_loop_sec": 1800,
     "effective_batch_size": 32,
+    "execution_requires_a100_min_vram_mib": 38000,
+    "execution_requires_parc_m3_execute_1": true,
+    "execution_requires_explicit_execute_flag": true,
     "raw_smoke_result_allowed": false,
     "actual_samples_consumed_required": true,
     "optimizer_updates_required": true,
     "final_run_config_hash_must_link_training_result": true,
+    "single_candidate_only": true,
     "automatic_training": false
   },
   "final_training": {
@@ -61,6 +67,8 @@
     "smoke_evidence_is_insufficient": true,
     "exact_training_result_link_required": true,
     "source_and_checkpoint_must_match_final_training": true,
+    "openvla_final_candidate_requires_keep_merged_environment": "PARC_M3_KEEP_MERGED_OPENVLA=1",
+    "openvla_final_candidate_keeps_one_eval_ready_artifact_through_freeze": true,
     "required_metrics": [
       "simulator_success_rate",
       "steps_to_success",
@@ -95,6 +103,7 @@
   "outputs": [
     "freeze_readiness.json",
     "final_run_config.json",
+    "final_execution_plan.json",
     "linked_final_training_result.json",
     "final_candidate_selection.json",
     "final_run_evidence.json",
