@@ -3,7 +3,7 @@
 
 The M3 fairness contract is stronger than selecting the same episode pool: each
 framework must consume the same ordered `(episode_id, timestep)` references for
-a given seed.  This module maps those references into a LeRobot map-style
+a given seed. This module maps those references into a LeRobot map-style
 dataset and validates the raw batches that actually leave the DataLoader.
 
 It contains no model code and starts no training.
@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass, field
-from typing import Any, Iterable, Iterator, Sequence
+from typing import Any, Iterable, Iterator
 
 from tools.benchmark.m3_runner_core import (
     EFFECTIVE_BATCH,
@@ -153,6 +153,8 @@ class M3ScheduleEvidence:
     gradient_accumulation: int
     expected_references: Iterator[dict[str, Any]]
     wall_target_sec: float = EQUAL_WALL_SEC
+    sample_target: int = EQUAL_DATA_BUDGET
+    optimizer_target: int = EQUAL_DATA_OPTIMIZER_UPDATES
     clock: Any = time.perf_counter
     consumed_samples: int = 0
     optimizer_updates: int = 0
@@ -167,6 +169,13 @@ class M3ScheduleEvidence:
             raise ValueError("micro-batch and gradient accumulation must be positive")
         if self.micro_batch * self.gradient_accumulation != EFFECTIVE_BATCH:
             raise ValueError("M3 effective batch must remain 32")
+        if self.sample_target <= 0 or self.optimizer_target <= 0:
+            raise ValueError("M3 evidence targets must be positive")
+        if self.track == "equal_data":
+            if self.sample_target % EFFECTIVE_BATCH != 0:
+                raise ValueError("equal-data sample target must be divisible by effective batch 32")
+            if self.optimizer_target * EFFECTIVE_BATCH != self.sample_target:
+                raise ValueError("equal-data optimizer target does not match sample target")
 
     def before_first_batch_fetch(self) -> None:
         if self.started_at is None:
@@ -180,7 +189,7 @@ class M3ScheduleEvidence:
             raise RuntimeError(
                 f"actual raw batch exceeds selected micro-batch: {len(actual)} > {self.micro_batch}"
             )
-        if self.track == "equal_data" and self.consumed_samples + len(actual) > EQUAL_DATA_BUDGET:
+        if self.track == "equal_data" and self.consumed_samples + len(actual) > self.sample_target:
             raise RuntimeError("equal-data actual sample overshoot blocked")
         for episode_id, timestep in actual:
             try:
@@ -205,7 +214,7 @@ class M3ScheduleEvidence:
             return False
         self.optimizer_updates += 1
         if self.track == "equal_data":
-            if self.consumed_samples == EQUAL_DATA_BUDGET:
+            if self.consumed_samples == self.sample_target:
                 self.stopped_at = float(self.clock())
                 return True
             return False
@@ -227,13 +236,13 @@ class M3ScheduleEvidence:
         if self.first_mismatches:
             raise RuntimeError(f"canonical sampling mismatches observed: {self.first_mismatches[:3]}")
         if self.track == "equal_data":
-            if self.consumed_samples != EQUAL_DATA_BUDGET:
+            if self.consumed_samples != self.sample_target:
                 raise RuntimeError(
-                    f"equal-data incomplete: {self.consumed_samples}/{EQUAL_DATA_BUDGET} samples"
+                    f"equal-data incomplete: {self.consumed_samples}/{self.sample_target} samples"
                 )
-            if self.optimizer_updates != EQUAL_DATA_OPTIMIZER_UPDATES:
+            if self.optimizer_updates != self.optimizer_target:
                 raise RuntimeError(
-                    f"equal-data optimizer updates mismatch: {self.optimizer_updates}/{EQUAL_DATA_OPTIMIZER_UPDATES}"
+                    f"equal-data optimizer updates mismatch: {self.optimizer_updates}/{self.optimizer_target}"
                 )
         else:
             if self.stopped_at is None or self.elapsed_sec < self.wall_target_sec:
@@ -245,6 +254,8 @@ class M3ScheduleEvidence:
             "micro_batch": self.micro_batch,
             "gradient_accumulation": self.gradient_accumulation,
             "effective_batch_size": self.micro_batch * self.gradient_accumulation,
+            "sample_target": self.sample_target,
+            "optimizer_target": self.optimizer_target,
             "consumed_samples": self.consumed_samples,
             "optimizer_updates": self.optimizer_updates,
             "train_wall_time_sec": self.elapsed_sec,
