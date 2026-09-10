@@ -60,6 +60,7 @@ def _validate_result(path: Path, *, order: str, track: str, model: str) -> dict[
         "selected_episode_ids_sha256": D10_HASH,
         "sampling_seed": TRAINING_SCHEDULE_SEED,
         "effective_batch_size": 32,
+        "benchmark_training_started": False,
     }
     for key, value in expected.items():
         if result.get(key) != value:
@@ -169,7 +170,7 @@ def main() -> int:
     contract = _load_json(streaming_contract)
     if contract.get("status") != "PASS" or contract.get("bridge_type") != "lerobot_streaming":
         raise RuntimeError("69c streaming contract is not PASS lerobot_streaming")
-    if contract.get("selected_episode_ids_sha256") != D10_HASH:
+    if contract.get("source_episode_ids_sha256") != D10_HASH:
         raise RuntimeError("69c streaming D10 mismatch")
 
     episode_ids, episode_lengths = load_d10_episode_lengths(
