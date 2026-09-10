@@ -40,39 +40,61 @@ def parse_args() -> argparse.Namespace:
     return p.parse_args()
 
 
-def _lifecycle_commands(args: argparse.Namespace, training: dict[str, Any]) -> tuple[list[str], list[str]]:
-    repo = args.repo_root.resolve()
-    source_root = args.parc_root / "vendor/openvla-oft-m3"
-    finalizer = repo / "tools/benchmark/m3_openvla_finalize_checkpoint.py"
-    dematerializer = repo / "tools/benchmark/m3_openvla_dematerialize_checkpoint.py"
-    if not finalizer.is_file():
-        raise FileNotFoundError(
-            f"OpenVLA evaluator lifecycle requires #54 finalizer to be present: {finalizer}"
-        )
-    if not dematerializer.is_file():
-        raise FileNotFoundError(
-            f"OpenVLA evaluator lifecycle requires #54 dematerializer to be present: {dematerializer}"
-        )
+def _lifecycle_paths(args: argparse.Namespace, training: dict[str, Any]) -> dict[str, Path]:
     checkpoint = Path(str(training.get("checkpoint_ref") or ""))
-    if not checkpoint.is_dir():
-        raise FileNotFoundError(f"OpenVLA checkpoint root missing: {checkpoint}")
+    return {
+        "source_root": args.parc_root / "vendor/openvla-oft-m3",
+        "python": args.parc_root / "venv-openvla-oft-m3/bin/python",
+        "finalizer": args.repo_root.resolve() / "tools/benchmark/m3_openvla_finalize_checkpoint.py",
+        "dematerializer": args.repo_root.resolve() / "tools/benchmark/m3_openvla_dematerialize_checkpoint.py",
+        "checkpoint": checkpoint,
+    }
+
+
+def _openvla_lifecycle_blockers(args: argparse.Namespace, training: dict[str, Any]) -> list[str]:
+    if training.get("model") != "openvla_oft" or training.get("checkpoint_eval_ready") is True:
+        return []
+    paths = _lifecycle_paths(args, training)
+    blockers: list[str] = []
+    if not paths["finalizer"].is_file():
+        blockers.append(
+            f"OpenVLA evaluator lifecycle requires #54 finalizer to be present: {paths['finalizer']}"
+        )
+    if not paths["dematerializer"].is_file():
+        blockers.append(
+            f"OpenVLA evaluator lifecycle requires #54 dematerializer to be present: {paths['dematerializer']}"
+        )
+    if not paths["python"].is_file():
+        blockers.append(f"OpenVLA evaluation Python missing: {paths['python']}")
+    if not paths["source_root"].is_dir():
+        blockers.append(f"OpenVLA pinned source root missing: {paths['source_root']}")
+    if not paths["checkpoint"].is_dir():
+        blockers.append(f"OpenVLA persistent checkpoint root missing: {paths['checkpoint']}")
+    return blockers
+
+
+def _lifecycle_commands(args: argparse.Namespace, training: dict[str, Any]) -> tuple[list[str], list[str]]:
+    blockers = _openvla_lifecycle_blockers(args, training)
+    if blockers:
+        raise RuntimeError("; ".join(blockers))
+    paths = _lifecycle_paths(args, training)
     finalize = [
-        str(args.parc_root / "venv-openvla-oft-m3/bin/python"),
+        str(paths["python"]),
         "-u",
-        str(finalizer),
+        str(paths["finalizer"]),
         "--source-root",
-        str(source_root),
+        str(paths["source_root"]),
         "--checkpoint-root",
-        str(checkpoint),
+        str(paths["checkpoint"]),
         "--result",
         str(args.training_result),
     ]
     cleanup = [
-        str(args.parc_root / "venv-openvla-oft-m3/bin/python"),
+        str(paths["python"]),
         "-u",
-        str(dematerializer),
+        str(paths["dematerializer"]),
         "--checkpoint-root",
-        str(checkpoint),
+        str(paths["checkpoint"]),
         "--result",
         str(args.training_result),
     ]
@@ -104,6 +126,42 @@ def _executor_command(args: argparse.Namespace) -> list[str]:
     return cmd
 
 
+def _write_lifecycle(
+    args: argparse.Namespace,
+    *,
+    model: str,
+    status: str,
+    blockers: list[str],
+    materialized_here: bool,
+    executor_rc: int | None,
+    cleanup_rc: int | None,
+) -> Path:
+    lifecycle = {
+        "schema_version": 2,
+        "stage": "M3_LIBERO_evaluation_lifecycle",
+        "status": status,
+        "model": model,
+        "mode": args.mode,
+        "execute": bool(args.execute),
+        "blockers": blockers,
+        "openvla_materialized_for_this_evaluation": materialized_here,
+        "openvla_keep_merged_requested": os.environ.get(KEEP_MERGED_ENV) == "1",
+        "openvla_dematerialized_after_evaluation": bool(
+            materialized_here
+            and os.environ.get(KEEP_MERGED_ENV) != "1"
+            and cleanup_rc == 0
+        ),
+        "executor_returncode": executor_rc,
+        "cleanup_returncode": cleanup_rc,
+        "automatic_upload": False,
+    }
+    path = args.output_root / str(model) / "evaluation_lifecycle.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(lifecycle, indent=2) + "\n", encoding="utf-8")
+    print(json.dumps(lifecycle, indent=2), flush=True)
+    return path
+
+
 def main() -> int:
     args = parse_args()
     if args.execute and args.mode == "preflight":
@@ -112,9 +170,22 @@ def main() -> int:
         raise RuntimeError(f"live evaluation requires explicit {EXECUTE_ENV}=1")
 
     training = _load(args.training_result)
-    model = training.get("model")
+    model = str(training.get("model") or "")
     if model not in {"pi05", "smolvla", "openvla_oft"}:
         raise ValueError(f"unknown M3 model: {model}")
+
+    lifecycle_blockers = _openvla_lifecycle_blockers(args, training)
+    if lifecycle_blockers:
+        _write_lifecycle(
+            args,
+            model=model,
+            status="BLOCKED",
+            blockers=lifecycle_blockers,
+            materialized_here=False,
+            executor_rc=None,
+            cleanup_rc=None,
+        )
+        return 2
 
     materialized_here = False
     cleanup_command: list[str] | None = None
@@ -151,26 +222,16 @@ def main() -> int:
             )
             cleanup_rc = int(cleanup.returncode)
 
-    lifecycle = {
-        "schema_version": 1,
-        "stage": "M3_LIBERO_evaluation_lifecycle",
-        "status": "PASS" if executor_rc == 0 and cleanup_rc == 0 else "FAILED",
-        "model": model,
-        "mode": args.mode,
-        "execute": bool(args.execute),
-        "openvla_materialized_for_this_evaluation": materialized_here,
-        "openvla_keep_merged_requested": os.environ.get(KEEP_MERGED_ENV) == "1",
-        "openvla_dematerialized_after_evaluation": bool(
-            materialized_here and os.environ.get(KEEP_MERGED_ENV) != "1" and cleanup_rc == 0
-        ),
-        "executor_returncode": executor_rc,
-        "cleanup_returncode": cleanup_rc,
-        "automatic_upload": False,
-    }
-    lifecycle_path = args.output_root / str(model) / "evaluation_lifecycle.json"
-    lifecycle_path.parent.mkdir(parents=True, exist_ok=True)
-    lifecycle_path.write_text(json.dumps(lifecycle, indent=2) + "\n", encoding="utf-8")
-    print(json.dumps(lifecycle, indent=2), flush=True)
+    status = "PASS" if executor_rc == 0 and cleanup_rc == 0 else "FAILED"
+    _write_lifecycle(
+        args,
+        model=model,
+        status=status,
+        blockers=[],
+        materialized_here=materialized_here,
+        executor_rc=executor_rc,
+        cleanup_rc=cleanup_rc,
+    )
     if executor_rc != 0:
         return executor_rc
     if cleanup_rc != 0:
