@@ -14,7 +14,10 @@ from typing import Any, Callable, Iterator
 
 import numpy as np
 
-from openvla_lerobot_streaming import iter_openvla_windows, iter_selected_trajectories
+try:  # package import in tests / M3 workers
+    from .openvla_lerobot_streaming import iter_openvla_windows, iter_selected_trajectories
+except ImportError:  # direct-script compatibility used by the existing 69c/72c notebooks
+    from openvla_lerobot_streaming import iter_openvla_windows, iter_selected_trajectories
 
 
 def to_openvla_rlds_batch(window: dict[str, Any]) -> dict[str, Any]:
