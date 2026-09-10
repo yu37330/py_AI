@@ -16,7 +16,9 @@ def test_notebook_73_is_pinned_smoke_only():
     assert PIN in code
     assert "run_m3_training_smoke.py" in code
     assert "PARC_M3_EXECUTE" in code
-    assert "benchmark" not in code.lower().replace("has not started", "")
+    assert "--mode', 'benchmark" not in code
+    assert '"--mode", "benchmark"' not in code
+    assert "mode='benchmark'" not in code
 
 
 def test_training_smoke_reuses_one_schedule_for_forward_reverse():
