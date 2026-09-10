@@ -2,7 +2,7 @@ import json
 from pathlib import Path
 
 
-PIN = "6e907ef5663f37b85010d0d1620ebc45d539105e"
+PIN = "e4693b0fc19cec4f87883158e5c9049547e6b31e"
 
 
 def test_notebook_73_is_pinned_smoke_only():
