@@ -22,6 +22,22 @@ def _write_json(path: Path, payload: dict[str, Any]) -> None:
     path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
 
 
+def _prepend_pythonpath(env: dict[str, str], repo: Path) -> None:
+    """Make repo-local ``tools.*`` imports resolvable in all child processes.
+
+    Some M3 entrypoints are intentionally launched by absolute file path. In
+    that mode Python puts the script directory, not the repository root, at
+    sys.path[0]. Keep the repository root in PYTHONPATH so those entrypoints
+    can still import ``tools.benchmark`` without depending on the caller's cwd.
+    """
+    root = str(repo)
+    current = env.get("PYTHONPATH", "")
+    parts = [p for p in current.split(os.pathsep) if p]
+    if root not in parts:
+        parts.insert(0, root)
+    env["PYTHONPATH"] = os.pathsep.join(parts)
+
+
 def main() -> int:
     repo = Path(os.environ.get("PY_AI_REPO", Path(__file__).resolve().parents[2])).resolve()
     drive = Path(os.environ.get("PARC_DRIVE_ROOT", "/content/drive/MyDrive/parc2026-cache")).resolve()
@@ -33,25 +49,29 @@ def main() -> int:
         raise FileNotFoundError(target)
 
     status = {
-        "schema_version": 1,
+        "schema_version": 2,
         "stage": "M3_A100_training_smoke_orchestrator",
         "status": "RUNNING",
         "python": sys.executable,
         "target": str(target),
+        "repo_pythonpath_injected": True,
         "benchmark_training_started": False,
         "full_1800_second_run_started": False,
     }
     _write_json(status_path, status)
     log_path.parent.mkdir(parents=True, exist_ok=True)
-    log_path.write_text(
-        "=== M3 training smoke orchestrator ===\n"
-        f"python={sys.executable}\n"
-        f"target={target}\n",
-        encoding="utf-8",
-    )
 
     env = os.environ.copy()
     env.setdefault("PYTHONUNBUFFERED", "1")
+    _prepend_pythonpath(env, repo)
+    log_path.write_text(
+        "=== M3 training smoke orchestrator ===\n"
+        f"python={sys.executable}\n"
+        f"target={target}\n"
+        f"PYTHONPATH={env.get('PYTHONPATH', '')}\n",
+        encoding="utf-8",
+    )
+
     cmd = [sys.executable, "-u", str(target)]
     print(">>>", " ".join(cmd), flush=True)
     lines: list[str] = []
