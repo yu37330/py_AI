@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 """Canonical live M3 LIBERO evaluation entry with bounded OpenVLA storage.
 
-For OpenVLA-OFT, the persistent training artifact is LoRA/components/D10 stats.
-This wrapper materializes merged 7B weights only immediately before evaluation
-and removes only those merged weights afterwards (unless explicitly retained).
-π0.5 and SmolVLA pass straight through to m3_libero_executor.py.
+For OpenVLA-OFT, the persistent M3 artifact is LoRA/components/D10 stats.
+Merged 7B weights are required only while the upstream evaluator is running.
+Unless `PARC_M3_KEEP_MERGED_OPENVLA=1` is explicitly set, this wrapper removes
+those merged weights after evaluation even when they were materialized by an
+earlier training/finalization step. π0.5 and SmolVLA pass straight through.
 """
 from __future__ import annotations
 
@@ -52,20 +53,13 @@ def _lifecycle_paths(args: argparse.Namespace, training: dict[str, Any]) -> dict
 
 
 def _openvla_lifecycle_blockers(args: argparse.Namespace, training: dict[str, Any]) -> list[str]:
-    if training.get("model") != "openvla_oft" or training.get("checkpoint_eval_ready") is True:
+    if training.get("model") != "openvla_oft":
         return []
     paths = _lifecycle_paths(args, training)
     blockers: list[str] = []
-    if not paths["finalizer"].is_file():
-        blockers.append(
-            f"OpenVLA evaluator lifecycle requires #54 finalizer to be present: {paths['finalizer']}"
-        )
-    if not paths["dematerializer"].is_file():
-        blockers.append(
-            f"OpenVLA evaluator lifecycle requires #54 dematerializer to be present: {paths['dematerializer']}"
-        )
-    if not paths["python"].is_file():
-        blockers.append(f"OpenVLA evaluation Python missing: {paths['python']}")
+    for label in ("finalizer", "dematerializer", "python"):
+        if not paths[label].is_file():
+            blockers.append(f"OpenVLA lifecycle {label} missing: {paths[label]}")
     if not paths["source_root"].is_dir():
         blockers.append(f"OpenVLA pinned source root missing: {paths['source_root']}")
     if not paths["checkpoint"].is_dir():
@@ -133,22 +127,26 @@ def _write_lifecycle(
     status: str,
     blockers: list[str],
     materialized_here: bool,
+    merged_present_before: bool,
     executor_rc: int | None,
     cleanup_rc: int | None,
 ) -> Path:
+    keep = os.environ.get(KEEP_MERGED_ENV) == "1"
     lifecycle = {
-        "schema_version": 2,
+        "schema_version": 3,
         "stage": "M3_LIBERO_evaluation_lifecycle",
         "status": status,
         "model": model,
         "mode": args.mode,
         "execute": bool(args.execute),
         "blockers": blockers,
+        "openvla_merged_present_before_evaluation": merged_present_before,
         "openvla_materialized_for_this_evaluation": materialized_here,
-        "openvla_keep_merged_requested": os.environ.get(KEEP_MERGED_ENV) == "1",
+        "openvla_keep_merged_requested": keep,
         "openvla_dematerialized_after_evaluation": bool(
-            materialized_here
-            and os.environ.get(KEEP_MERGED_ENV) != "1"
+            model == "openvla_oft"
+            and args.execute
+            and not keep
             and cleanup_rc == 0
         ),
         "executor_returncode": executor_rc,
@@ -173,6 +171,7 @@ def main() -> int:
     model = str(training.get("model") or "")
     if model not in {"pi05", "smolvla", "openvla_oft"}:
         raise ValueError(f"unknown M3 model: {model}")
+    merged_present_before = bool(model == "openvla_oft" and training.get("checkpoint_eval_ready") is True)
 
     lifecycle_blockers = _openvla_lifecycle_blockers(args, training)
     if lifecycle_blockers:
@@ -182,6 +181,7 @@ def main() -> int:
             status="BLOCKED",
             blockers=lifecycle_blockers,
             materialized_here=False,
+            merged_present_before=merged_present_before,
             executor_rc=None,
             cleanup_rc=None,
         )
@@ -190,13 +190,14 @@ def main() -> int:
     materialized_here = False
     cleanup_command: list[str] | None = None
     env = os.environ.copy()
-    if args.execute and model == "openvla_oft" and training.get("checkpoint_eval_ready") is not True:
+    if model == "openvla_oft":
         finalize_command, cleanup_command = _lifecycle_commands(args, training)
-        subprocess.run(finalize_command, cwd=str(args.repo_root), env=env, check=True)
-        finalized = _load(args.training_result)
-        if finalized.get("checkpoint_eval_ready") is not True:
-            raise RuntimeError("OpenVLA finalizer did not produce eval-ready checkpoint")
-        materialized_here = True
+        if args.execute and training.get("checkpoint_eval_ready") is not True:
+            subprocess.run(finalize_command, cwd=str(args.repo_root), env=env, check=True)
+            finalized = _load(args.training_result)
+            if finalized.get("checkpoint_eval_ready") is not True:
+                raise RuntimeError("OpenVLA finalizer did not produce eval-ready checkpoint")
+            materialized_here = True
 
     executor_rc = 0
     cleanup_rc = 0
@@ -210,7 +211,8 @@ def main() -> int:
         executor_rc = int(completed.returncode)
     finally:
         if (
-            materialized_here
+            args.execute
+            and model == "openvla_oft"
             and cleanup_command is not None
             and os.environ.get(KEEP_MERGED_ENV) != "1"
         ):
@@ -229,6 +231,7 @@ def main() -> int:
         status=status,
         blockers=[],
         materialized_here=materialized_here,
+        merged_present_before=merged_present_before,
         executor_rc=executor_rc,
         cleanup_rc=cleanup_rc,
     )
