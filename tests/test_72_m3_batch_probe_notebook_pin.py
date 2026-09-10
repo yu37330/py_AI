@@ -6,15 +6,16 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 BASE_PROBE_PIN = "2b961ef03619fea21f36dc902fb8b7b02f793120"
 SMOLVLA_LIBERO_PIN = "5c334095e327c56173e06eed4c5f19fae3fc7878"
-OPENVLA_WANDB_PIN = "d0c7dce7b3f557099148b385b5159a85c662341d"
+OPENVLA_STREAMING_RUNTIME_PIN = "64fc7684e011ccfdbcb11c72a7d16a36400dc3ab"
 OLD_PIN = "5baa5e3297ae476fe6f462ebcaac6d988f1a8e43"
 OLD_OPENVLA_DIAG_PIN = "ac9a5c403784bbc7624c9055ed6282b27f16b3a3"
 OLD_OPENVLA_COMPAT_PIN = "d680d5acae4beed905fdeb7541b33d590d8f314f"
+OLD_OPENVLA_WANDB_PIN = "d0c7dce7b3f557099148b385b5159a85c662341d"
 
 NOTEBOOKS = {
     "72a_m3_pi05_batch_probe.ipynb": ("run_m3_pi05_batch_probe.py", BASE_PROBE_PIN),
     "72b_m3_smolvla_batch_probe.ipynb": ("run_m3_smolvla_batch_probe.py", SMOLVLA_LIBERO_PIN),
-    "72c_m3_openvla_oft_batch_probe.ipynb": ("run_m3_openvla_batch_probe.py", OPENVLA_WANDB_PIN),
+    "72c_m3_openvla_oft_batch_probe.ipynb": ("run_m3_openvla_batch_probe.py", OPENVLA_STREAMING_RUNTIME_PIN),
     "72d_m3_batch_probe_controller.ipynb": ("validate_m3_batch_probes.py", BASE_PROBE_PIN),
 }
 
@@ -67,11 +68,12 @@ def test_72b_surfaces_persisted_result_and_probe_log_diagnostics():
     assert "input_features/output_features=null" in markdown
 
 
-def test_72c_prepares_wandb_and_surfaces_persisted_diagnostics():
+def test_72c_prepares_runtime_and_surfaces_persisted_diagnostics():
     _, source, markdown = _read_notebook("72c_m3_openvla_oft_batch_probe.ipynb")
-    assert OPENVLA_WANDB_PIN in source
+    assert OPENVLA_STREAMING_RUNTIME_PIN in source
     assert OLD_OPENVLA_DIAG_PIN not in source
     assert OLD_OPENVLA_COMPAT_PIN not in source
+    assert OLD_OPENVLA_WANDB_PIN not in source
     assert "prepare_m3_openvla_wandb_compat.py" in source
     assert "openvla_oft_status.json" in source
     assert "logs/openvla_oft/setup.log" in source
@@ -79,7 +81,7 @@ def test_72c_prepares_wandb_and_surfaces_persisted_diagnostics():
     assert "72c SETUP LOG TAIL" in source
     assert "72c PROBE LOG TAIL" in source
     assert "W&B" in markdown
-    assert "protobuf 3.20.x" in markdown
+    assert "pandas / pyarrow / PyAV" in markdown
 
     runner = (ROOT / "tools/colab/run_m3_openvla_batch_probe.py").read_text(encoding="utf-8")
     for token in (
@@ -104,10 +106,14 @@ def test_72c_prepares_wandb_and_surfaces_persisted_diagnostics():
     for token in (
         'WANDB_VERSION = "0.16.6"',
         'PROTOBUF_VERSION = "3.20.3"',
+        'PANDAS_VERSION = "2.2.3"',
+        'PYARROW_VERSION = "17.0.0"',
+        'AV_VERSION = "12.3.0"',
         "pin_wandb_protobuf_compat",
-        "verify_wandb_compat",
-        "import wandb",
-        "wandb_import_ok",
+        "pin_streaming_data_runtime",
+        "verify_wandb_streaming_compat",
+        "import wandb, pandas, pyarrow, av",
+        "wandb_streaming_import_ok",
     ):
         assert token in prepare
 
