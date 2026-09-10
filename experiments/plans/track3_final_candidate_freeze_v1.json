@@ -1,5 +1,5 @@
 {
-  "schema_version": 2,
+  "schema_version": 3,
   "stage": "Track3_final_candidate_freeze",
   "status": "IMPLEMENTED_PENDING_REAL_M3_EVIDENCE",
   "deadline_jst": "2026-09-17T23:59:00+09:00",
@@ -20,12 +20,34 @@
     "non_selected_models_require_complete_matrix_or_documented_exclusion": true,
     "documented_exclusion_status": "EXCLUDED_WITH_EVIDENCE"
   },
+  "final_run": {
+    "prepare_entry": "tools/submission/prepare_track3_final_run.py",
+    "training_result_link_entry": "tools/submission/link_track3_final_training_result.py",
+    "canonical_freeze_entry": "tools/submission/finalize_track3_submission.py",
+    "source_ref_must_match_promotion_registry_and_recipe": true,
+    "recipe_file_sha256_frozen_before_run": true,
+    "promotion_summary_sha256_frozen_before_run": true,
+    "training_schedule_seed": 20260906,
+    "allowed_budget_tracks": ["equal_data", "equal_wall"],
+    "equal_data_sample_budget": 4800,
+    "equal_data_optimizer_updates": 150,
+    "equal_wall_train_loop_sec": 1800,
+    "effective_batch_size": 32,
+    "raw_smoke_result_allowed": false,
+    "actual_samples_consumed_required": true,
+    "optimizer_updates_required": true,
+    "final_run_config_hash_must_link_training_result": true,
+    "automatic_training": false
+  },
   "final_training": {
     "status": "PASS",
     "checkpoint_ref_required": true,
     "source_ref_required": true,
+    "source_ref_must_match_promoted_source": true,
     "train_wall_time_required": true,
     "peak_train_vram_required": true,
+    "actual_samples_consumed_required": true,
+    "final_run_config_link_required": true,
     "openvla_checkpoint_eval_ready_required": true,
     "openvla_lora_merge_excluded_from_train_wall_time": true
   },
@@ -38,6 +60,7 @@
     "episodes_per_seed": 400,
     "smoke_evidence_is_insufficient": true,
     "exact_training_result_link_required": true,
+    "source_and_checkpoint_must_match_final_training": true,
     "required_metrics": [
       "simulator_success_rate",
       "steps_to_success",
@@ -61,16 +84,20 @@
     "full 40-hex source SHA",
     "exact D10 manifest and hash",
     "complete M3 promotion evidence or explicit exclusion for every compared model",
-    "PASS final training result with checkpoint_ref/source_ref",
-    "PASS 800-episode simulator evaluation linked to the exact training result and checkpoint",
+    "immutable final-run config tied to promoted source/recipe/promotion hashes",
+    "PASS linked final training result with actual samples/wall time/checkpoint reference",
+    "PASS 800-episode simulator evaluation linked to the exact final training result and checkpoint",
     "complete required evaluation metrics",
     "readable final model/adapter artifact",
-    "readable final config",
+    "readable final model config",
     "exact reproduction command"
   ],
   "outputs": [
     "freeze_readiness.json",
+    "final_run_config.json",
+    "linked_final_training_result.json",
     "final_candidate_selection.json",
+    "final_run_evidence.json",
     "track3_submission_spec.json",
     "submission_artifact_freeze.json"
   ],
