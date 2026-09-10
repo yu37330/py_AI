@@ -48,6 +48,7 @@
   },
   "openvla": {
     "entry": "tools/benchmark/m3_openvla_train_entry.py",
+    "checkpoint_finalizer": "tools/benchmark/m3_openvla_finalize_checkpoint.py",
     "bridge": "lerobot_streaming",
     "modified_libero_rlds_allowed": false,
     "full_rlds_materialization": false,
@@ -58,7 +59,10 @@
     "use_l1_regression": true,
     "lora_rank": 32,
     "learning_rate": 0.0005,
-    "global_D10_normalization_reused_for_all_eval_suites": true
+    "global_D10_normalization_reused_for_all_eval_suites": true,
+    "lora_merge_for_evaluation": true,
+    "lora_merge_runs_after_train_timer_stops": true,
+    "merged_checkpoint_required_before_simulator_evaluation": true
   },
   "current_gate": "code-complete for guarded smoke/benchmark execution; requires real 72d batch summary and A100 smoke before benchmark launch"
 }
