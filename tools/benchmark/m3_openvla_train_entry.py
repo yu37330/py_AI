@@ -158,7 +158,7 @@ def main() -> int:
     contract = json.loads(args.streaming_contract.read_text(encoding="utf-8"))
     if contract.get("status") != "PASS" or contract.get("bridge_type") != "lerobot_streaming":
         raise RuntimeError("69c streaming contract is not PASS lerobot_streaming")
-    if contract.get("selected_episode_ids_sha256") != D10_HASH:
+    if contract.get("source_episode_ids_sha256") != D10_HASH:
         raise RuntimeError("69c streaming contract D10 mismatch")
     statistics = contract.get("dataset_statistics")
     if not isinstance(statistics, dict) or int(statistics.get("num_transitions", 0)) <= 0:
@@ -452,7 +452,7 @@ def main() -> int:
         "use_l1_regression": True,
         "image_aug_applied": True,
         "checkpoint_statistics_scope": "global_D10_stats_aliased_to_each_LIBERO_suite_for_inference_unnormalization",
-        "benchmark_training_started": True,
+        "benchmark_training_started": args.mode == "benchmark",
     }
     args.result_out.parent.mkdir(parents=True, exist_ok=True)
     args.result_out.write_text(json.dumps(result, indent=2) + "\n", encoding="utf-8")
