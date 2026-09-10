@@ -88,7 +88,7 @@ def test_openvla_worker_contract_is_guarded_and_does_not_materialize_rlds():
     assert "image_aug=True" in inner
     assert "merge_lora_during_training=False" in inner
     assert '"full_rlds_materialized": False' in inner
-    assert "save_dataset_statistics(statistics, checkpoint_dir)" in inner
+    assert "save_dataset_statistics({DATASET_NAME: statistics}, checkpoint_dir)" in inner
 
     assert "iter_selected_trajectories" not in source
     assert "TFRecord" not in source
