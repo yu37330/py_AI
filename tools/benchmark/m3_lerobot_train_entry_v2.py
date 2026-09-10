@@ -502,7 +502,7 @@ def main() -> int:
         "training_loss_best_effort": state["last_loss"],
         "canonical_schedule_sampler": True,
         "native_random_sampler_used": False,
-        "benchmark_training_started": True,
+        "benchmark_training_started": args.mode == "benchmark",
     }
     args.result_out.parent.mkdir(parents=True, exist_ok=True)
     args.result_out.write_text(json.dumps(result, indent=2) + "\n", encoding="utf-8")
