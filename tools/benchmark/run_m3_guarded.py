@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
 """Guarded sequence orchestrator for PARC2026 M3 training.
 
-The orchestrator executes exactly one requested order/track at a time.  It never
+The orchestrator executes exactly one requested order/track at a time. It never
 starts training unless `PARC_M3_EXECUTE=1` is present, never selects a dataset,
 and never infers batch sizes: all per-model micro-batch/gradient-accumulation
 values come from the 72d-bound adapter plan.
 
 Smoke mode is deliberately small and always uses the canonical equal-data
-prefix (64 samples / 2 effective optimizer updates per model).  Benchmark mode
-runs one explicitly selected fair-comparison track.  Running forward does not
+prefix (64 samples / 2 effective optimizer updates per model). Benchmark mode
+runs one explicitly selected fair-comparison track. Running forward does not
 automatically start reverse, and vice versa.
 """
 from __future__ import annotations
@@ -101,6 +101,13 @@ def _completed_matches(
     )
 
 
+def _worker_module(model: str) -> str:
+    path = ADAPTERS[model].worker
+    if not path.endswith(".py"):
+        raise ValueError(f"worker path is not a Python module: {path}")
+    return path[:-3].replace("/", ".")
+
+
 def _worker_command(
     *,
     repo: Path,
@@ -122,7 +129,8 @@ def _worker_command(
     cmd = [
         sys.executable,
         "-u",
-        str(worker),
+        "-m",
+        _worker_module(model),
         "--repo-root",
         str(repo),
         "--adapter-plan",
