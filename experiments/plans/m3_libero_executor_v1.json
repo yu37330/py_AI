@@ -1,17 +1,33 @@
 {
-  "schema_version": 4,
+  "schema_version": 5,
   "stage": "M3_LIBERO_simulator_executor",
   "status": "IMPLEMENTED_PENDING_A100_SMOKE",
   "canonical_live_entry": "tools/benchmark/run_m3_libero_evaluation.py",
+  "screening_order_entry": "tools/colab/run_m3_screening_evaluation_order.py",
+  "promotion_record_entry": "tools/benchmark/m3_promotion_record.py",
+  "promotion_controller_entry": "tools/colab/run_m3_promotion_controller.py",
   "seed_set": [20260906, 20260907],
   "suites": ["libero_spatial", "libero_object", "libero_goal", "libero_10"],
   "tasks_per_suite": 10,
   "max_steps_per_episode": 300,
   "evaluation_protocol": {
-    "smoke_trials_per_task": 1,
-    "smoke_episode_records_per_model": 80,
-    "benchmark_trials_per_task": 10,
-    "benchmark_episode_records_per_model": 800,
+    "m3_screening": {
+      "internal_executor_mode": "smoke",
+      "trials_per_task": 1,
+      "episode_records_per_checkpoint": 80,
+      "checkpoint_count_complete_forward_reverse_matrix": 12,
+      "total_episode_records_complete_matrix": 960,
+      "purpose": "promotion screening only",
+      "forward_and_reverse_both_required": true
+    },
+    "final_selected_candidate": {
+      "internal_executor_mode": "benchmark",
+      "trials_per_task": 10,
+      "episode_records": 800,
+      "candidate_count": 1,
+      "purpose": "final submission evidence after promotion",
+      "owned_by_final_candidate_flow_pr_68": true
+    },
     "hard_reset": true,
     "fixed_initial_states": true,
     "batch_size": 1,
@@ -22,7 +38,8 @@
     "gpu": "single NVIDIA A100",
     "minimum_gpu_vram_mib": 38000,
     "exact_source_revision_required": true,
-    "smoke_before_benchmark": true
+    "screening_before_promotion": true,
+    "promotion_before_final_800_episode_evaluation": true
   },
   "models": {
     "pi05": {
@@ -78,6 +95,17 @@
     "policy_runtime_type_must_be_preserved": true,
     "training_metrics_are_linked_from_training_result": ["train_wall_time", "peak_train_vram"]
   },
+  "promotion_handoff": {
+    "screening_promotion_record": "tools/benchmark/m3_promotion_record.py",
+    "requires_training_schedule_hash_and_samples_from_training_result": true,
+    "requires_simulator_metrics_from_evaluation_summary": true,
+    "normal_complete_matrix_record_count": 12,
+    "controller": "tools/colab/run_m3_promotion_controller.py",
+    "controller_output": "m3_promotion_summary.json",
+    "max_promoted_models": 2,
+    "primary_metric": "simulator_success_rate",
+    "training_loss_used": false
+  },
   "aggregation": {
     "episode_schema": "tools/benchmark/m3_evaluation_metrics.py",
     "combined_episode_records": true,
@@ -92,11 +120,23 @@
     ],
     "training_loss_is_not_a_promotion_metric": true
   },
+  "parallel_execution": {
+    "forward_screening_notebook": "colab/76a_m3_forward_screening_evaluation.ipynb",
+    "reverse_screening_notebook": "colab/76b_m3_reverse_screening_evaluation.ipynb",
+    "can_run_on_separate_a100_sessions": true,
+    "drive_output_roots_are_order_scoped": true,
+    "promotion_notebook": "colab/77_m3_forward_reverse_promotion_controller.ipynb",
+    "promotion_notebook_requires_gpu": false
+  },
   "integration_order": [
     "merge PR #66 training/checkpoint lifecycle first",
-    "update/rebase this branch onto main so lifecycle tools are present",
-    "run guarded A100 simulator smoke",
-    "only then permit full 800-episode benchmark evaluation"
+    "update/rebase PR #67 onto main so lifecycle tools are present",
+    "run guarded evaluator smoke if needed",
+    "run 75a/75b training benchmarks",
+    "run 76a/76b screening evaluation in parallel when possible",
+    "run 77 promotion controller",
+    "hand promoted model(s) to PR #68 final candidate flow",
+    "run 800 episodes only for the final selected submission candidate"
   ],
-  "current_gate": "PR #66 must land first; then rebase/update this branch and run guarded A100 simulator smoke before benchmark evaluation"
+  "current_gate": "PR #66 must land first; then integrate #67 and run A100 smoke/screening before promotion. Final 800-episode evaluation is reserved for one selected candidate."
 }
