@@ -1,11 +1,12 @@
 {
-  "schema_version": 2,
+  "schema_version": 3,
   "stage": "M3_model_adapter_execution",
   "status": "IMPLEMENTED_PENDING_A100_SMOKE",
   "selected_dataset_variant": "V2_SQRT_BALANCED_RAW",
   "selected_episode_ids_sha256": "73ed0d3b0c5e73c745c0aa2e81517ce1fa40240c75f9eb040d65b6876ba08239",
   "models": ["pi05", "smolvla", "openvla_oft"],
-  "seed_set": [20260906, 20260907],
+  "training_schedule_seed": 20260906,
+  "evaluation_seed_set": [20260906, 20260907],
   "batch_config_source": "m3_batch_probe_summary.json",
   "batch_values_are_late_bound": true,
   "effective_batch_size": 32,
@@ -13,6 +14,7 @@
     "policy": "uniform_selected_frames_with_replacement_v1",
     "canonical_schedule_required": true,
     "native_random_sampler_allowed": false,
+    "forward_reverse_reuse_same_training_schedule_seed": true,
     "forward_reverse_reuse_same_schedule_hash": true,
     "equal_wall_continues_counter_stream_after_materialized_4800_prefix": true,
     "equal_wall_does_not_cycle_4800_prefix": true
@@ -40,6 +42,17 @@
     "smoke_and_benchmark_require": "PARC_M3_EXECUTE=1",
     "automatic_full_run": false
   },
+  "smoke": {
+    "entry": "tools/colab/run_m3_training_smoke.py",
+    "orders": ["forward", "reverse"],
+    "tracks": ["equal_data", "equal_wall"],
+    "training_schedule_seed": 20260906,
+    "equal_data_samples_per_model": 64,
+    "equal_wall_target_sec": 5,
+    "openvla_merged_checkpoint_materialized": false,
+    "openvla_merge_deferred_to_evaluation": true,
+    "full_1800_second_run_started": false
+  },
   "lerobot": {
     "pi05_equal_data_and_wall_entry": "tools/benchmark/m3_lerobot_train_entry_v2.py",
     "smolvla_equal_data_and_wall_entry": "tools/benchmark/m3_lerobot_train_entry_v2.py",
@@ -62,7 +75,8 @@
     "global_D10_normalization_reused_for_all_eval_suites": true,
     "lora_merge_for_evaluation": true,
     "lora_merge_runs_after_train_timer_stops": true,
+    "training_smoke_skips_7b_merge": true,
     "merged_checkpoint_required_before_simulator_evaluation": true
   },
-  "current_gate": "code-complete for guarded smoke/benchmark execution; requires real 72d batch summary and A100 smoke before benchmark launch"
+  "current_gate": "run Notebook 73 A100 training smoke against the real 72d batch summary; do not launch the 1800-second benchmark until smoke PASS"
 }
