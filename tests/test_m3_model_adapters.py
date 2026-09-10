@@ -219,7 +219,8 @@ def test_plan_contract_records_live_execution_and_no_random_sampler():
         (Path(__file__).resolve().parents[1] / "experiments/plans/m3_model_adapter_contract_v1.json").read_text()
     )
     assert contract["status"] == "IMPLEMENTED_PENDING_A100_SMOKE"
-    assert contract["seed_set"] == [20260906, 20260907]
+    assert contract["training_schedule_seed"] == 20260906
+    assert contract["evaluation_seed_set"] == [20260906, 20260907]
     assert contract["sampling"]["native_random_sampler_allowed"] is False
     assert contract["sampling"]["equal_wall_does_not_cycle_4800_prefix"] is True
     assert contract["execution"]["forward"] == ["pi05", "smolvla", "openvla_oft"]
