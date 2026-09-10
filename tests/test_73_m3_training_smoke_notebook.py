@@ -2,10 +2,10 @@ import json
 from pathlib import Path
 
 
-PIN = "b5c2d150ba8d361ca22da874677827f8924f41fc"
+PIN = "66d3388b02a4b173c5c8f5e559fc5e9c454b192f"
 
 
-def test_notebook_73_is_pinned_smoke_only():
+def test_notebook_73_is_pinned_smoke_only_and_bootstraps_fresh_runtime():
     root = Path(__file__).resolve().parents[1]
     nb = json.loads((root / "colab/73_m3_a100_training_smoke.ipynb").read_text())
     code = "\n".join(
@@ -14,11 +14,33 @@ def test_notebook_73_is_pinned_smoke_only():
         if cell.get("cell_type") == "code"
     )
     assert PIN in code
+    assert "prepare_m3_training_runtimes.py" in code
     assert "run_m3_training_smoke.py" in code
     assert "PARC_M3_EXECUTE" in code
+    assert "RUNTIME SETUP LOG TAIL" in code
+    assert "LATEST SMOKE PLAN" in code
+    assert "LATEST TRAIN RESULT" in code
     assert "--mode', 'benchmark" not in code
     assert '"--mode", "benchmark"' not in code
     assert "mode='benchmark'" not in code
+
+
+def test_runtime_setup_rebuilds_ephemeral_colab_dependencies_without_probes():
+    root = Path(__file__).resolve().parents[1]
+    text = (root / "tools/colab/prepare_m3_training_runtimes.py").read_text()
+    for token in (
+        "setup_train.sh",
+        'SMOL_REF = "3f2c29ef7e44b1ddccbcda3b6a63939e53639e9e"',
+        'OPENVLA_REF = "e4287e94541f459edc4feabc4e181f537cd569a8"',
+        "prepare_m3_openvla_wandb_compat.py",
+        '"probes_rerun": False',
+        '"benchmark_training_started": False',
+        "runtime_preflight",
+    ):
+        assert token in text
+    assert "run_m3_pi05_batch_probe.py" not in text
+    assert "run_m3_smolvla_batch_probe.py" not in text
+    assert "run_m3_openvla_batch_probe.py" not in text
 
 
 def test_training_smoke_reuses_one_schedule_for_forward_reverse():
