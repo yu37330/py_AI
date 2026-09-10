@@ -14,7 +14,7 @@ from tools.benchmark.m3_libero_executor import (
 
 
 def _training(model: str):
-    return {
+    payload = {
         "status": "PASS",
         "model": model,
         "checkpoint_ref": f"/tmp/{model}/checkpoint",
@@ -24,6 +24,10 @@ def _training(model: str):
         "track": "equal_data",
         "metrics": {"train_wall_time": 100.0, "peak_train_vram": 1000.0},
     }
+    if model == "openvla_oft":
+        payload["checkpoint_eval_ready"] = True
+        payload["lora_merged_for_evaluation"] = True
+    return payload
 
 
 def _jobs(tmp_path: Path, model: str, smoke: bool):
@@ -135,7 +139,10 @@ def test_entries_enforce_300_hard_reset_and_instrument_upstream_rollout():
     assert "timed_get_action" in openvla_entry
     assert "save_rollout_video = lambda" in openvla_entry
     assert 'text.startswith("Episode error:")' in openvla_entry
-    assert "_validate_checkpoint_statistics" in openvla_entry
+    assert "_validate_checkpoint" in openvla_entry
+    assert "checkpoint_eval_ready" in openvla_entry
+    assert "lora_merged_for_evaluation" in openvla_entry
+    assert "model*.safetensors" in openvla_entry
     assert 'validate_runtime("openvla_oft"' in openvla_entry
 
 
@@ -163,6 +170,7 @@ def test_executor_contract_records_live_guard_and_full_metric_set():
     assert contract["evaluation_protocol"]["benchmark_episode_records_per_model"] == 800
     assert contract["runtime_gate"]["minimum_gpu_vram_mib"] == 38000
     assert contract["models"]["openvla_oft"]["silent_upstream_episode_errors_are_fatal"] is True
+    assert contract["models"]["openvla_oft"]["checkpoint_must_be_merged_for_upstream_evaluator"] is True
     assert contract["evaluation_protocol"]["automatic_full_evaluation"] is False
     assert contract["aggregation"]["required_metrics"] == [
         "simulator_success_rate",
