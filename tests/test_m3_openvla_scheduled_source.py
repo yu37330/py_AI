@@ -1,12 +1,14 @@
 from pathlib import Path
+import sys
 
-from tools.data.openvla_scheduled_training_source import (
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "tools/data"))
+
+from tools.data.openvla_scheduled_training_source import (  # noqa: E402
     IMAGE_AUGMENT_KWARGS,
     augmentation_seed_pair,
     transform_scheduled_batch,
 )
-
-ROOT = Path(__file__).resolve().parents[1]
 
 
 class _FakeSource:
@@ -84,7 +86,7 @@ def test_openvla_worker_contract_is_guarded_and_does_not_materialize_rlds():
     assert "ScheduledOpenVLASource(" in inner
     assert "transform_scheduled_batch(" in inner
     assert "image_aug=True" in inner
-    assert 'merge_lora_during_training=False' in inner
+    assert "merge_lora_during_training=False" in inner
     assert '"full_rlds_materialized": False' in inner
     assert "save_dataset_statistics(statistics, checkpoint_dir)" in inner
 
