@@ -23,7 +23,15 @@ def parse_args() -> argparse.Namespace:
     return p.parse_args()
 
 
-def _validate_checkpoint_statistics(checkpoint: Path, suites: tuple[str, ...]) -> None:
+def _validate_checkpoint(checkpoint: Path, suites: tuple[str, ...]) -> None:
+    if not (checkpoint / "config.json").is_file():
+        raise FileNotFoundError("OpenVLA M3 checkpoint is not a merged evaluator-loadable model: config.json missing")
+    if not list(checkpoint.glob("model*.safetensors")):
+        raise FileNotFoundError("OpenVLA M3 checkpoint is not a merged evaluator-loadable model: safetensors missing")
+    if not list(checkpoint.glob("action_head--*checkpoint.pt")):
+        raise FileNotFoundError("OpenVLA M3 checkpoint action head missing")
+    if not list(checkpoint.glob("proprio_projector--*checkpoint.pt")):
+        raise FileNotFoundError("OpenVLA M3 checkpoint proprio projector missing")
     path = checkpoint / "dataset_statistics.json"
     if not path.is_file():
         raise FileNotFoundError(f"OpenVLA M3 checkpoint missing normalization stats: {path}")
@@ -58,6 +66,10 @@ def main() -> int:
     training = validate_training_result(args.training_result)
     if training["model"] != "openvla_oft":
         raise ValueError("OpenVLA evaluator requires openvla_oft training result")
+    if training.get("checkpoint_eval_ready") is not True:
+        raise ValueError("OpenVLA training result is not marked checkpoint_eval_ready")
+    if training.get("lora_merged_for_evaluation") is not True:
+        raise ValueError("OpenVLA LoRA checkpoint was not finalized for evaluation")
     if args.suite not in SUITES:
         raise ValueError(f"unexpected LIBERO suite: {args.suite}")
     if args.seed not in SEEDS:
@@ -66,7 +78,7 @@ def main() -> int:
     checkpoint = Path(str(training["checkpoint_ref"])).resolve()
     if not checkpoint.is_dir():
         raise FileNotFoundError(f"OpenVLA M3 checkpoint directory missing: {checkpoint}")
-    _validate_checkpoint_statistics(checkpoint, SUITES)
+    _validate_checkpoint(checkpoint, SUITES)
 
     module = importlib.import_module("experiments.robot.libero.run_libero_eval")
     original_run_episode = module.run_episode
@@ -98,8 +110,6 @@ def main() -> int:
 
     module.get_action = timed_get_action
     module.log_message = fail_closed_log
-    # M3 evidence does not require replay videos; suppressing their encoding
-    # saves evaluation time without changing the simulator rollout.
     module.save_rollout_video = lambda *a, **kw: None
     for key in list(module.TASK_MAX_STEPS):
         module.TASK_MAX_STEPS[key] = 300
