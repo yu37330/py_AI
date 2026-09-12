@@ -1,8 +1,11 @@
 {
-  "schema_version": 5,
+  "schema_version": 6,
   "stage": "M3_LIBERO_simulator_executor",
-  "status": "IMPLEMENTED_PENDING_A100_SMOKE",
+  "status": "READY_FOR_MINIMAL_A100_SMOKE",
   "canonical_live_entry": "tools/benchmark/run_m3_libero_evaluation.py",
+  "minimal_smoke_notebook": "colab/74_m3_minimal_simulator_smoke.ipynb",
+  "minimal_smoke_runtime_setup": "tools/colab/prepare_m3_simulator_runtimes.py",
+  "minimal_smoke_runner": "tools/colab/run_m3_minimal_simulator_smoke.py",
   "screening_order_entry": "tools/colab/run_m3_screening_evaluation_order.py",
   "promotion_record_entry": "tools/benchmark/m3_promotion_record.py",
   "promotion_controller_entry": "tools/colab/run_m3_promotion_controller.py",
@@ -11,6 +14,18 @@
   "tasks_per_suite": 10,
   "max_steps_per_episode": 300,
   "evaluation_protocol": {
+    "minimal_smoke": {
+      "training_checkpoint_scope": "notebook73_forward_equal_data_smoke_only",
+      "suite": "libero_spatial",
+      "task_count": 10,
+      "seed_set": [20260906, 20260907],
+      "trials_per_task": 1,
+      "episode_records_per_model": 20,
+      "model_count": 3,
+      "total_episode_records": 60,
+      "promotion_evidence": false,
+      "benchmark_training_started": false
+    },
     "m3_screening": {
       "internal_executor_mode": "smoke",
       "trials_per_task": 1,
@@ -38,6 +53,8 @@
     "gpu": "single NVIDIA A100",
     "minimum_gpu_vram_mib": 38000,
     "exact_source_revision_required": true,
+    "notebook73_training_smoke_pass_required": true,
+    "fresh_colab_runtime_bootstrap_supported": true,
     "screening_before_promotion": true,
     "promotion_before_final_800_episode_evaluation": true
   },
@@ -46,16 +63,19 @@
       "backend": "pinned_lerobot_eval",
       "source_ref": "v0.4.4",
       "n_action_steps": 10,
-      "episode_entry": "tools/benchmark/m3_lerobot_eval_entry.py"
+      "episode_entry": "tools/benchmark/m3_lerobot_eval_entry.py",
+      "simulator_dependency": "hf-libero==0.1.3"
     },
     "smolvla": {
       "backend": "pinned_lerobot_eval",
       "source_ref": "3f2c29ef7e44b1ddccbcda3b6a63939e53639e9e",
-      "episode_entry": "tools/benchmark/m3_lerobot_eval_entry.py"
+      "episode_entry": "tools/benchmark/m3_lerobot_eval_entry.py",
+      "simulator_dependency": "hf-libero==0.1.3"
     },
     "openvla_oft": {
       "backend": "pinned_openvla_oft_run_libero_eval",
       "source_ref": "e4287e94541f459edc4feabc4e181f537cd569a8",
+      "libero_source_ref": "8f1084e3132a39270c3a13ebe37270a43ece2a01",
       "center_crop": true,
       "episode_entry": "tools/benchmark/m3_openvla_eval_entry.py",
       "persistent_checkpoint_form": "lora_components_and_d10_stats",
@@ -71,7 +91,7 @@
     }
   },
   "openvla_storage_lifecycle": {
-    "requires_training_adapter_tools_from_pr_66": true,
+    "training_adapter_tools_already_merged_from_pr_66": true,
     "finalizer": "tools/benchmark/m3_openvla_finalize_checkpoint.py",
     "dematerializer": "tools/benchmark/m3_openvla_dematerialize_checkpoint.py",
     "materialize_only_for_evaluation_or_final_freeze": true,
@@ -129,14 +149,15 @@
     "promotion_notebook_requires_gpu": false
   },
   "integration_order": [
-    "merge PR #66 training/checkpoint lifecycle first",
-    "update/rebase PR #67 onto main so lifecycle tools are present",
-    "run guarded evaluator smoke if needed",
+    "PR #66 training/checkpoint lifecycle merged",
+    "PR #71 fresh-Colab training runtime bootstrap merged",
+    "Notebook 73 A100 training smoke PASS confirmed",
+    "run Notebook 74 minimal simulator smoke and require 60/60 episode records",
     "run 75a/75b training benchmarks",
     "run 76a/76b screening evaluation in parallel when possible",
     "run 77 promotion controller",
     "hand promoted model(s) to PR #68 final candidate flow",
     "run 800 episodes only for the final selected submission candidate"
   ],
-  "current_gate": "PR #66 must land first; then integrate #67 and run A100 smoke/screening before promotion. Final 800-episode evaluation is reserved for one selected candidate."
+  "current_gate": "Notebook 73 training smoke is PASS. Next gate is Notebook 74 minimal simulator smoke; benchmark training remains disabled until 74 passes."
 }
