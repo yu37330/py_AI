@@ -58,6 +58,7 @@ def main() -> int:
 
     module = importlib.import_module("lerobot.scripts.lerobot_eval")
     original_rollout = module.rollout
+    original_eval_policy_all = getattr(module, "eval_policy_all", None)
     records: list[dict] = []
 
     def instrumented_rollout(*rollout_args, **rollout_kwargs):
@@ -117,7 +118,19 @@ def main() -> int:
             records.append(record)
         return rollout_data
 
+    def no_video_eval_policy_all(*eval_args, **eval_kwargs):
+        """Keep M3 smoke/screening evaluation headless and storage-bounded."""
+        if original_eval_policy_all is None:
+            raise RuntimeError("pinned LeRobot evaluator is missing eval_policy_all")
+        eval_kwargs["max_episodes_rendered"] = 0
+        eval_kwargs["videos_dir"] = None
+        if "recording_dir" in eval_kwargs:
+            eval_kwargs["recording_dir"] = None
+        return original_eval_policy_all(*eval_args, **eval_kwargs)
+
     module.rollout = instrumented_rollout
+    if original_eval_policy_all is not None:
+        module.eval_policy_all = no_video_eval_policy_all
     args.output_dir.mkdir(parents=True, exist_ok=True)
     cli = [
         "lerobot-eval",
@@ -126,7 +139,9 @@ def main() -> int:
         f"--env.task={args.suite}",
         "--env.episode_length=300",
         "--env.init_states=true",
-        "--env.hard_reset=true",
+        # Do not pass --env.hard_reset here. π0.5 is pinned to LeRobot v0.4.4,
+        # whose LiberoEnv config has no hard_reset field. hf-libero/robosuite
+        # already defaults hard_reset=True; the newer SmolVLA LiberoEnv does too.
         "--eval.batch_size=1",
         f"--eval.n_episodes={args.episodes}",
         "--env.max_parallel_tasks=1",
@@ -142,6 +157,8 @@ def main() -> int:
     finally:
         sys.argv = old_argv
         module.rollout = original_rollout
+        if original_eval_policy_all is not None:
+            module.eval_policy_all = original_eval_policy_all
 
     expected = 10 * args.episodes
     if len(records) != expected:
