@@ -28,6 +28,8 @@ def test_pinned_libero_checkout_is_not_modified_to_fix_packaging():
     text = path.read_text(encoding="utf-8")
 
     assert 'LIBERO_REF = "8f1084e3132a39270c3a13ebe37270a43ece2a01"' in text
-    assert "setup.py" not in text
     assert "find_namespace_packages" not in text
-    assert "write_text(str(root)" in text
+    assert "_install_source_pth(python_bin, libero_source, log)" in text
+    assert "target.write_text(str(root)" in text
+    assert "libero_source / 'setup.py'" not in text
+    assert 'libero_source / "setup.py"' not in text
