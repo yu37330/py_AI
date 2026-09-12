@@ -3,7 +3,7 @@ import json
 from pathlib import Path
 
 
-NOTEBOOK_PIN = "4038644c5b0826ec1c77ebc9c899148fe53cdbdd"
+NOTEBOOK_PIN = "148c06f7d69206ee9f1c418306969fc41e49cad8"
 
 
 def _notebook_code(root: Path) -> str:
