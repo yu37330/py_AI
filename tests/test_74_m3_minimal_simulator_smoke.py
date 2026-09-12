@@ -3,7 +3,7 @@ import json
 from pathlib import Path
 
 
-NOTEBOOK_PIN = "0101acb94aae28fee8929f3d36f9c22ee4c473e1"
+NOTEBOOK_PIN = "aece76c8efce6cc04db4fe3aab2d2d03f7aa4a80"
 
 
 def _notebook_code(root: Path) -> str:
@@ -19,12 +19,14 @@ def test_notebook74_is_pinned_and_runs_runtime_setup_before_smoke():
     root = Path(__file__).resolve().parents[1]
     code = _notebook_code(root)
     assert NOTEBOOK_PIN in code
-    assert "ATTEMPT = '4'" in code
+    assert "ATTEMPT = '5'" in code
     assert "prepare_m3_libero_noninteractive_config.py" in code
     assert "prepare_m3_simulator_runtimes.py" in code
+    assert "prepare_m3_mujoco_compat.py" in code
     assert "run_m3_minimal_simulator_smoke.py" in code
     assert code.index("prepare_m3_libero_noninteractive_config.py") < code.index("prepare_m3_simulator_runtimes.py")
-    assert code.index("prepare_m3_simulator_runtimes.py") < code.index("run_m3_minimal_simulator_smoke.py")
+    assert code.index("prepare_m3_simulator_runtimes.py") < code.index("prepare_m3_mujoco_compat.py")
+    assert code.index("prepare_m3_mujoco_compat.py") < code.index("run_m3_minimal_simulator_smoke.py")
     assert "LIBERO_CONFIG_PATH" in code
     assert "m3-libero-config/shared" in code
     assert "MPLBACKEND" in code
@@ -69,6 +71,20 @@ def test_simulator_runtime_setup_is_syntax_valid_and_does_not_rerun_probes_or_be
     assert "72b_m3" not in text
     assert "72c_m3" not in text
     assert "1800" not in text
+
+
+def test_mujoco_compat_helper_pins_all_three_eval_runtimes():
+    root = Path(__file__).resolve().parents[1]
+    path = root / "tools/colab/prepare_m3_mujoco_compat.py"
+    text = path.read_text(encoding="utf-8")
+    ast.parse(text, filename=str(path))
+    assert 'MUJOCO_VERSION = "3.3.1"' in text
+    assert '"pi05"' in text
+    assert '"smolvla"' in text
+    assert '"openvla_oft"' in text
+    assert "mujoco_robosuite_import_ok" in text
+    assert '"benchmark_training_started": False' in text
+    assert '"simulator_episode_started": False' in text
 
 
 def test_minimal_smoke_runner_is_frozen_to_60_nonpromotion_episodes_and_attempt_scoped():
