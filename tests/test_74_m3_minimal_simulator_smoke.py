@@ -19,7 +19,7 @@ def test_notebook74_is_pinned_and_runs_runtime_setup_before_smoke():
     root = Path(__file__).resolve().parents[1]
     code = _notebook_code(root)
     assert NOTEBOOK_PIN in code
-    assert "ATTEMPT = '2'" in code
+    assert "ATTEMPT = '3'" in code
     assert "prepare_m3_libero_noninteractive_config.py" in code
     assert "prepare_m3_simulator_runtimes.py" in code
     assert "run_m3_minimal_simulator_smoke.py" in code
@@ -27,6 +27,8 @@ def test_notebook74_is_pinned_and_runs_runtime_setup_before_smoke():
     assert code.index("prepare_m3_simulator_runtimes.py") < code.index("run_m3_minimal_simulator_smoke.py")
     assert "LIBERO_CONFIG_PATH" in code
     assert "m3-libero-config/shared" in code
+    assert "MPLBACKEND" in code
+    assert "'Agg'" in code
     assert "PARC_M3_EXECUTE" in code
     assert "PARC_M3_SIM_SMOKE_ATTEMPT" in code
     assert "HF_TOKEN" in code
