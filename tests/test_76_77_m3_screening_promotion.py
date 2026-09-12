@@ -3,8 +3,8 @@ import json
 from pathlib import Path
 
 
-SCREENING_PIN = "659cbc51f84a466986dd7698b8d362358f3a24e0"
-PROMOTION_PIN = "d21e4c231fb82a6aa90cfe556402372ffc473793"
+SCREENING_PIN = "23fea09284db3ab5caa0225c9e08c6a3496c453e"
+PROMOTION_PIN = "23fea09284db3ab5caa0225c9e08c6a3496c453e"
 
 
 def _notebook_code(root: Path, name: str) -> str:
