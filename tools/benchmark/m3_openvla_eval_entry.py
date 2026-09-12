@@ -49,6 +49,23 @@ def _validate_checkpoint(checkpoint: Path, suites: tuple[str, ...]) -> None:
                     raise ValueError(f"OpenVLA checkpoint missing {suite}.{feature}.{key}")
 
 
+def _write_progress(path: Path, *, runtime: dict, records: list[dict], status: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps(
+            {
+                "status": status,
+                "episode_count": len(records),
+                "runtime": runtime,
+                "episodes": records,
+            },
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+
 def main() -> int:
     args = parse_args()
     if args.trials_per_task <= 0:
@@ -89,6 +106,7 @@ def main() -> int:
     records: list[dict] = []
     current_latencies: list[float] = []
     current_errors: list[str] = []
+    progress_out = args.records_out.with_name(args.records_out.stem + ".partial.json")
 
     import torch  # noqa: PLC0415
 
@@ -180,6 +198,7 @@ def main() -> int:
         record["gpu_vram_mib"] = runtime["gpu_vram_mib"]
         record["inference_calls"] = len(current_latencies)
         records.append(record)
+        _write_progress(progress_out, runtime=runtime, records=records, status="RUNNING")
         return success, replay_images
 
     module.run_episode = instrumented_run_episode
@@ -217,11 +236,11 @@ def main() -> int:
     expected = 10 * args.trials_per_task
     if len(records) != expected:
         raise RuntimeError(f"OpenVLA episode record count mismatch: {len(records)} != {expected}")
-    args.records_out.parent.mkdir(parents=True, exist_ok=True)
-    args.records_out.write_text(
-        json.dumps({"runtime": runtime, "episodes": records}, indent=2) + "\n",
-        encoding="utf-8",
-    )
+    _write_progress(args.records_out, runtime=runtime, records=records, status="PASS")
+    try:
+        progress_out.unlink(missing_ok=True)
+    except OSError as exc:
+        print(f"WARNING: could not remove partial progress marker {progress_out}: {exc}", file=sys.stderr, flush=True)
     print(json.dumps({
         "status": "PASS",
         "model": "openvla_oft",
