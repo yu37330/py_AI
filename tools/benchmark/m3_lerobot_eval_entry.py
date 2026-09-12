@@ -200,6 +200,8 @@ def main() -> int:
     if original_eval_policy_all is not None:
         module.eval_policy_all = no_video_eval_policy_all
     args.output_dir.mkdir(parents=True, exist_ok=True)
+    upstream_dir = args.output_dir / "upstream"
+    upstream_dir.mkdir(parents=True, exist_ok=True)
     cli = [
         "lerobot-eval",
         f"--policy.path={training['checkpoint_ref']}",
@@ -214,7 +216,7 @@ def main() -> int:
         f"--eval.n_episodes={args.episodes}",
         "--env.max_parallel_tasks=1",
         f"--seed={args.seed}",
-        f"--output_dir={args.output_dir / 'upstream'}",
+        f"--output_dir={upstream_dir}",
     ]
     if rename_map:
         cli.append(f"--rename_map={json.dumps(rename_map, separators=(',', ':'))}")
