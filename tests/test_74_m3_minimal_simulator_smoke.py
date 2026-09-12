@@ -3,7 +3,7 @@ import json
 from pathlib import Path
 
 
-NOTEBOOK_PIN = "148c06f7d69206ee9f1c418306969fc41e49cad8"
+NOTEBOOK_PIN = "0101acb94aae28fee8929f3d36f9c22ee4c473e1"
 
 
 def _notebook_code(root: Path) -> str:
@@ -19,7 +19,7 @@ def test_notebook74_is_pinned_and_runs_runtime_setup_before_smoke():
     root = Path(__file__).resolve().parents[1]
     code = _notebook_code(root)
     assert NOTEBOOK_PIN in code
-    assert "ATTEMPT = '3'" in code
+    assert "ATTEMPT = '4'" in code
     assert "prepare_m3_libero_noninteractive_config.py" in code
     assert "prepare_m3_simulator_runtimes.py" in code
     assert "run_m3_minimal_simulator_smoke.py" in code
@@ -60,6 +60,7 @@ def test_simulator_runtime_setup_is_syntax_valid_and_does_not_rerun_probes_or_be
     assert "prepare_m3_training_runtimes.py" in text
     assert "hf-libero==" in text
     assert "8f1084e3132a39270c3a13ebe37270a43ece2a01" in text
+    assert "parc_m3_pinned_libero.pth" in text
     assert '"probes_rerun": False' in text
     assert '"benchmark_training_started": False' in text
     assert '"simulator_started": False' in text
