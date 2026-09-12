@@ -98,6 +98,46 @@ def _checkpoint_statistics(statistics: dict[str, Any]) -> dict[str, Any]:
     return {suite: copy.deepcopy(statistics) for suite in SUITES}
 
 
+def _sync_pinned_model_logic(
+    source_root: Path,
+    vla_path: str,
+    update_auto_map,
+    check_model_logic_mismatch,
+) -> None:
+    """Sync the pinned OFT HF model implementation into the downloaded checkpoint.
+
+    Upstream ``check_model_logic_mismatch`` discovers its source files through
+    ``./prismatic``.  Notebook 72c invokes its probe with ``cwd=source_root``;
+    Notebook 73 historically inherited the py_AI repository cwd instead, so the
+    sync silently found no model files and Transformers loaded stale checkpoint
+    logic without the multi-image vision-backbone methods.  Keep the cwd switch
+    local to the upstream helper and restore it before continuing.
+    """
+    source_root = Path(source_root).resolve()
+    source_hf = source_root / "prismatic/extern/hf"
+    required = ("modeling_prismatic.py", "configuration_prismatic.py")
+    missing_source = [name for name in required if not (source_hf / name).is_file()]
+    if missing_source:
+        raise FileNotFoundError(
+            f"pinned OpenVLA model-logic files missing under {source_hf}: {missing_source}"
+        )
+
+    previous_cwd = Path.cwd()
+    try:
+        os.chdir(source_root)
+        update_auto_map(vla_path)
+        check_model_logic_mismatch(vla_path)
+    finally:
+        os.chdir(previous_cwd)
+
+    checkpoint_root = Path(vla_path)
+    missing_synced = [name for name in required if not (checkpoint_root / name).is_file()]
+    if missing_synced:
+        raise RuntimeError(
+            f"OpenVLA checkpoint model-logic sync incomplete at {checkpoint_root}: {missing_synced}"
+        )
+
+
 def main() -> int:
     args = parse_args()
     if os.environ.get("PARC_M3_EXECUTE") != "1":
@@ -181,8 +221,12 @@ def main() -> int:
 
     vla_path = snapshot_download(repo_id="openvla/openvla-7b")
     if state.is_main_process:
-        update_auto_map(vla_path)
-        check_model_logic_mismatch(vla_path)
+        _sync_pinned_model_logic(
+            args.source_root,
+            vla_path,
+            update_auto_map,
+            check_model_logic_mismatch,
+        )
     dist.barrier()
 
     processor = AutoProcessor.from_pretrained(vla_path, trust_remote_code=True)
@@ -192,7 +236,22 @@ def main() -> int:
         low_cpu_mem_usage=True,
         trust_remote_code=True,
     ).to(device_id)
+    required_vision_methods = (
+        "set_num_images_in_input",
+        "get_num_images_in_input",
+        "get_num_patches",
+    )
+    missing_vision_methods = [
+        name for name in required_vision_methods if not hasattr(vla.vision_backbone, name)
+    ]
+    if missing_vision_methods:
+        raise RuntimeError(
+            "OpenVLA loaded stale/incompatible vision-backbone logic after sync; "
+            f"missing methods: {missing_vision_methods}"
+        )
     vla.vision_backbone.set_num_images_in_input(2)
+    if int(vla.vision_backbone.get_num_images_in_input()) != 2:
+        raise RuntimeError("OpenVLA vision backbone did not accept two-image M3 configuration")
     vla = get_peft_model(
         vla,
         LoraConfig(
