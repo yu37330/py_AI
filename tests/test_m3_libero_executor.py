@@ -163,16 +163,17 @@ def test_openvla_lifecycle_wrapper_materializes_then_cleans_by_default():
     assert "subprocess.run(\n                cleanup_command" in wrapper
 
 
-def test_lifecycle_wrapper_requires_pr66_tools_in_integrated_tree():
+def test_lifecycle_wrapper_uses_merged_pr66_checkpoint_tools():
     root = Path(__file__).resolve().parents[1]
     wrapper = (root / "tools/benchmark/run_m3_libero_evaluation.py").read_text()
-    assert "requires #54 finalizer to be present" in wrapper
-    assert "requires #54 dematerializer to be present" in wrapper
+    assert "m3_openvla_finalize_checkpoint.py" in wrapper
+    assert "m3_openvla_dematerialize_checkpoint.py" in wrapper
     contract = json.loads(
         (root / "experiments/plans/m3_libero_executor_v1.json").read_text()
     )
-    assert contract["openvla_storage_lifecycle"]["requires_training_adapter_tools_from_pr_66"] is True
-    assert contract["integration_order"][0].startswith("merge PR #66")
+    lifecycle = contract["openvla_storage_lifecycle"]
+    assert lifecycle["training_adapter_tools_already_merged_from_pr_66"] is True
+    assert contract["integration_order"][0].startswith("PR #66")
 
 
 def test_instrumentation_scope_is_policy_inference_not_preprocessing():
@@ -191,17 +192,25 @@ def test_executor_contract_records_live_guard_storage_lifecycle_and_metric_set()
     contract = json.loads(
         (root / "experiments/plans/m3_libero_executor_v1.json").read_text()
     )
-    assert contract["status"] == "IMPLEMENTED_PENDING_A100_SMOKE"
+    assert contract["status"] == "READY_FOR_MINIMAL_A100_SMOKE"
     assert contract["canonical_live_entry"] == "tools/benchmark/run_m3_libero_evaluation.py"
+    assert contract["minimal_smoke_runtime_setup"] == "tools/colab/prepare_m3_simulator_runtimes.py"
     assert contract["seed_set"] == list(SEEDS)
     assert contract["max_steps_per_episode"] == 300
     assert contract["evaluation_protocol"]["hard_reset"] is True
-    assert contract["evaluation_protocol"]["smoke_episode_records_per_model"] == 80
-    assert contract["evaluation_protocol"]["benchmark_episode_records_per_model"] == 800
+    minimal = contract["evaluation_protocol"]["minimal_smoke"]
+    assert minimal["episode_records_per_model"] == 20
+    assert minimal["total_episode_records"] == 60
+    assert minimal["promotion_evidence"] is False
+    screening = contract["evaluation_protocol"]["m3_screening"]
+    assert screening["episode_records_per_checkpoint"] == 80
+    final = contract["evaluation_protocol"]["final_selected_candidate"]
+    assert final["episode_records"] == 800
     assert contract["runtime_gate"]["minimum_gpu_vram_mib"] == 38000
+    assert contract["runtime_gate"]["notebook73_training_smoke_pass_required"] is True
     openvla = contract["models"]["openvla_oft"]
     assert openvla["silent_upstream_episode_errors_are_fatal"] is True
-    assert openvla["jit_merge_before_evaluation"] is True
+    assert openvla["jit_merge_before_evaluation_when_needed"] is True
     assert openvla["default_dematerialize_merged_weights_after_evaluation"] is True
     lifecycle = contract["openvla_storage_lifecycle"]
     assert lifecycle["remove_only_merged_model_weights_after_evaluation"] is True
