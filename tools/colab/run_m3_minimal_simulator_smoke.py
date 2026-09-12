@@ -32,6 +32,14 @@ def _load(path: Path) -> dict[str, Any]:
     return data
 
 
+def _headless_env() -> dict[str, str]:
+    env = os.environ.copy()
+    env["MPLBACKEND"] = "Agg"
+    env["MUJOCO_GL"] = "egl"
+    env["PYOPENGL_PLATFORM"] = "egl"
+    return env
+
+
 def _training_path(drive: Path, model: str) -> Path:
     return (
         drive
@@ -72,7 +80,7 @@ def _run_job(command: list[str], *, cwd: Path, log_path: Path) -> list[dict[str,
         subprocess.run(
             command,
             cwd=str(cwd),
-            env=os.environ.copy(),
+            env=_headless_env(),
             stdout=fh,
             stderr=subprocess.STDOUT,
             check=True,
@@ -135,27 +143,31 @@ def main() -> int:
 
         finalizer = repo / "tools/benchmark/m3_openvla_finalize_checkpoint.py"
         dematerializer = repo / "tools/benchmark/m3_openvla_dematerialize_checkpoint.py"
+        merged_present_before = bool(model == "openvla_oft" and training.get("checkpoint_eval_ready") is True)
+        finalization_attempted = False
         materialized_openvla = False
         episodes: list[dict[str, Any]] = []
         try:
             if model == "openvla_oft":
                 if not finalizer.is_file() or not dematerializer.is_file():
                     raise RuntimeError("minimal OpenVLA simulator smoke requires integrated PR #66 lifecycle tools")
-                subprocess.run([
-                    runtime.python,
-                    "-u",
-                    str(finalizer),
-                    "--source-root",
-                    runtime.command_root,
-                    "--checkpoint-root",
-                    str(training["checkpoint_ref"]),
-                    "--result",
-                    str(training_path),
-                ], cwd=str(repo), env=os.environ.copy(), check=True)
-                training = _load(training_path)
-                if training.get("checkpoint_eval_ready") is not True:
-                    raise RuntimeError("OpenVLA minimal smoke finalizer did not produce eval-ready checkpoint")
-                materialized_openvla = True
+                if not merged_present_before:
+                    finalization_attempted = True
+                    subprocess.run([
+                        runtime.python,
+                        "-u",
+                        str(finalizer),
+                        "--source-root",
+                        runtime.command_root,
+                        "--checkpoint-root",
+                        str(training["checkpoint_ref"]),
+                        "--result",
+                        str(training_path),
+                    ], cwd=str(repo), env=_headless_env(), check=True)
+                    training = _load(training_path)
+                    if training.get("checkpoint_eval_ready") is not True:
+                        raise RuntimeError("OpenVLA minimal smoke finalizer did not produce eval-ready checkpoint")
+                    materialized_openvla = True
 
             for seed in SEEDS:
                 out = model_root / f"seed-{seed}" / SUITE
@@ -202,8 +214,17 @@ def main() -> int:
                     ]
                 episodes.extend(_run_job(command, cwd=Path(runtime.command_root), log_path=log))
         finally:
-            if model == "openvla_oft" and materialized_openvla:
-                subprocess.run([
+            # If this smoke created (or even only started creating) merged 7B
+            # weights, remove them on both success and failure. Never remove a
+            # merged checkpoint that already existed before this attempt.
+            cleanup_needed = (
+                model == "openvla_oft"
+                and not merged_present_before
+                and (materialized_openvla or finalization_attempted)
+            )
+            if cleanup_needed:
+                active_exception = sys.exc_info()[0] is not None
+                cleanup = subprocess.run([
                     runtime.python,
                     "-u",
                     str(dematerializer),
@@ -211,7 +232,13 @@ def main() -> int:
                     str(training["checkpoint_ref"]),
                     "--result",
                     str(training_path),
-                ], cwd=str(repo), env=os.environ.copy(), check=True)
+                ], cwd=str(repo), env=_headless_env(), check=False)
+                if cleanup.returncode != 0:
+                    message = f"OpenVLA merged-weight cleanup failed rc={cleanup.returncode}"
+                    if active_exception:
+                        print("WARNING: " + message, file=sys.stderr, flush=True)
+                    else:
+                        raise RuntimeError(message)
 
         if len(episodes) != EXPECTED_PER_MODEL:
             raise RuntimeError(f"minimal simulator smoke episode count mismatch for {model}: {len(episodes)}")
