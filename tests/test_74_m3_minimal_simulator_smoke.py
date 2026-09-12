@@ -3,7 +3,7 @@ import json
 from pathlib import Path
 
 
-NOTEBOOK_PIN = "aece76c8efce6cc04db4fe3aab2d2d03f7aa4a80"
+NOTEBOOK_PIN = "68ce9c31dc9746d634dd1bb618b0cb63e9597364"
 
 
 def _notebook_code(root: Path) -> str:
@@ -19,7 +19,7 @@ def test_notebook74_is_pinned_and_runs_runtime_setup_before_smoke():
     root = Path(__file__).resolve().parents[1]
     code = _notebook_code(root)
     assert NOTEBOOK_PIN in code
-    assert "ATTEMPT = '5'" in code
+    assert "ATTEMPT = '6'" in code
     assert "prepare_m3_libero_noninteractive_config.py" in code
     assert "prepare_m3_simulator_runtimes.py" in code
     assert "prepare_m3_mujoco_compat.py" in code
