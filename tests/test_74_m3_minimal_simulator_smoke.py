@@ -3,7 +3,7 @@ import json
 from pathlib import Path
 
 
-NOTEBOOK_PIN = "9b1719c6f9e67c954d9da1f25044a00a2cd3af03"
+NOTEBOOK_PIN = "4038644c5b0826ec1c77ebc9c899148fe53cdbdd"
 
 
 def _notebook_code(root: Path) -> str:
@@ -29,6 +29,9 @@ def test_notebook74_is_pinned_and_runs_runtime_setup_before_smoke():
     assert "m3-libero-config/shared" in code
     assert "MPLBACKEND" in code
     assert "'Agg'" in code
+    assert "MUJOCO_GL" in code
+    assert "PYOPENGL_PLATFORM" in code
+    assert "'egl'" in code
     assert "PARC_M3_EXECUTE" in code
     assert "PARC_M3_SIM_SMOKE_ATTEMPT" in code
     assert "HF_TOKEN" in code
