@@ -3,7 +3,7 @@ import json
 from pathlib import Path
 
 
-NOTEBOOK_PIN = "fc05d7711bfff2d9a77323f3704cc545282cf5c9"
+NOTEBOOK_PIN = "1b983910509020dc2a01f1474140d72bf5664e8e"
 
 
 def _notebook_code(root: Path) -> str:
@@ -19,14 +19,19 @@ def test_notebook74_is_pinned_and_runs_runtime_setup_before_smoke():
     root = Path(__file__).resolve().parents[1]
     code = _notebook_code(root)
     assert NOTEBOOK_PIN in code
-    assert "ATTEMPT = '7'" in code
+    assert "ATTEMPT = '8'" in code
+    assert "prepare_m3_disk_headroom.py" in code
+    assert "'pre-setup'" in code
+    assert "'pre-eval'" in code
     assert "prepare_m3_libero_noninteractive_config.py" in code
     assert "prepare_m3_simulator_runtimes.py" in code
     assert "prepare_m3_mujoco_compat.py" in code
     assert "run_m3_minimal_simulator_smoke.py" in code
+    assert code.index("'pre-setup'") < code.index("prepare_m3_libero_noninteractive_config.py")
     assert code.index("prepare_m3_libero_noninteractive_config.py") < code.index("prepare_m3_simulator_runtimes.py")
     assert code.index("prepare_m3_simulator_runtimes.py") < code.index("prepare_m3_mujoco_compat.py")
-    assert code.index("prepare_m3_mujoco_compat.py") < code.index("run_m3_minimal_simulator_smoke.py")
+    assert code.index("prepare_m3_mujoco_compat.py") < code.index("'pre-eval'")
+    assert code.index("'pre-eval'") < code.index("run_m3_minimal_simulator_smoke.py")
     assert "LIBERO_CONFIG_PATH" in code
     assert "m3-libero-config/shared" in code
     assert "MPLBACKEND" in code
@@ -38,6 +43,11 @@ def test_notebook74_is_pinned_and_runs_runtime_setup_before_smoke():
     assert "PARC_M3_SIM_SMOKE_ATTEMPT" in code
     assert "HF_TOKEN" in code
     assert "74 FAILURE DIAGNOSTICS" in code
+    assert "def safe_tail" in code
+    assert "diagnostic read failed" in code
+    assert "df', '-h'" in code
+    assert "df', '-i'" in code
+    assert "episode_records.partial.json" in code
     assert "m3_minimal_simulator_smoke_summary.json" in code
     assert "latest eval log" in code
     assert "attempt-{ATTEMPT}" in code
