@@ -49,6 +49,17 @@ def _write_status(path: Path, *, status: str, stage: str, error: str | None = No
     path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
 
+def _headless_env(base: dict[str, str] | None = None) -> dict[str, str]:
+    child = os.environ.copy()
+    if base:
+        child.update(base)
+    child["PYTHONUNBUFFERED"] = "1"
+    child["MPLBACKEND"] = "Agg"
+    child["MUJOCO_GL"] = "egl"
+    child["PYOPENGL_PLATFORM"] = "egl"
+    return child
+
+
 def _run(
     cmd: list[str],
     *,
@@ -56,11 +67,7 @@ def _run(
     cwd: Path | None = None,
     env: dict[str, str] | None = None,
 ) -> None:
-    child = os.environ.copy()
-    if env:
-        child.update(env)
-    child.setdefault("PYTHONUNBUFFERED", "1")
-    child.setdefault("MUJOCO_GL", "egl")
+    child = _headless_env(env)
     log.parent.mkdir(parents=True, exist_ok=True)
     print(">>>", " ".join(cmd), flush=True)
     with log.open("a", encoding="utf-8") as fh:
@@ -222,7 +229,8 @@ def _write_libero_config(source: Path) -> None:
     package_root = source / "libero/libero"
     if not package_root.is_dir():
         raise FileNotFoundError(package_root)
-    cfg = Path.home() / ".libero/config.yaml"
+    config_root = Path(os.environ.get("LIBERO_CONFIG_PATH", Path.home() / ".libero"))
+    cfg = config_root / "config.yaml"
     cfg.parent.mkdir(parents=True, exist_ok=True)
     cfg.write_text(
         "\n".join(
@@ -266,7 +274,6 @@ def _install_openvla_libero(root: Path, log: Path) -> None:
     )
     env = {
         "PYTHONPATH": str(openvla_source),
-        "MUJOCO_GL": "egl",
     }
     _run(
         [
