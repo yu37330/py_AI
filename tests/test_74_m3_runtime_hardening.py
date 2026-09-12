@@ -51,3 +51,35 @@ def test_openvla_dematerializer_preserves_persistent_training_artifacts():
     assert "action_head--*checkpoint.pt" in text
     assert "proprio_projector--*checkpoint.pt" in text
     assert 'result["checkpoint_eval_ready"] = False' in text
+
+
+def test_disk_headroom_cleanup_is_safe_and_fail_fast():
+    root = Path(__file__).resolve().parents[1]
+    path = root / "tools/colab/prepare_m3_disk_headroom.py"
+    text = path.read_text(encoding="utf-8")
+    ast.parse(text, filename=str(path))
+    assert 'LOCAL_MIN_FREE_GIB = 24.0' in text
+    assert 'DRIVE_MIN_FREE_GIB = 20.0' in text
+    assert '["uv", "cache", "clean"]' in text
+    assert '"pip", "cache", "purge"' in text
+    assert '["apt-get", "clean"]' in text
+    assert '.cache/huggingface' in text
+    assert "Do not touch ~/.cache/huggingface" in text
+    assert "D10 data/manifests" in text
+    assert "insufficient local /content headroom" in text
+    assert "insufficient Google Drive headroom" in text
+
+
+def test_evaluators_persist_attempt_scoped_partial_episode_evidence():
+    root = Path(__file__).resolve().parents[1]
+    for rel in (
+        "tools/benchmark/m3_lerobot_eval_entry.py",
+        "tools/benchmark/m3_openvla_eval_entry.py",
+    ):
+        text = (root / rel).read_text(encoding="utf-8")
+        ast.parse(text, filename=rel)
+        assert "def _write_progress" in text
+        assert 'status="RUNNING"' in text
+        assert 'status="PASS"' in text
+        assert '"episode_count": len(records)' in text
+        assert 'partial.json' in text
