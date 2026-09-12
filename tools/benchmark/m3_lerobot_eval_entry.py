@@ -16,6 +16,15 @@ from pathlib import Path
 import sys
 import time
 
+ENV_VISUAL_KEYS = (
+    "observation.images.image",
+    "observation.images.image2",
+)
+CANONICAL_D10_VISUAL_KEYS = (
+    "observation.images.front",
+    "observation.images.wrist",
+)
+
 
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser()
@@ -29,6 +38,48 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--output-dir", type=Path, required=True)
     p.add_argument("--records-out", type=Path, required=True)
     return p.parse_args()
+
+
+def _checkpoint_visual_features(checkpoint: Path) -> tuple[str, ...]:
+    config_path = checkpoint / "config.json"
+    if not config_path.is_file():
+        raise FileNotFoundError(f"LeRobot checkpoint config missing: {config_path}")
+    payload = json.loads(config_path.read_text(encoding="utf-8"))
+    input_features = payload.get("input_features")
+    if not isinstance(input_features, dict):
+        raise RuntimeError(f"LeRobot checkpoint input_features missing/invalid: {config_path}")
+    visuals = tuple(str(key) for key in input_features if str(key).startswith("observation.images."))
+    if len(visuals) != 2:
+        raise RuntimeError(
+            f"M3 LeRobot evaluator requires exactly two visual inputs; got {list(visuals)} from {config_path}"
+        )
+    return visuals
+
+
+def _camera_rename_map(checkpoint: Path) -> dict[str, str]:
+    """Resolve the frozen LIBERO env camera keys against checkpoint feature names.
+
+    hf-libero emits ``image`` (agent/front) and ``image2`` (wrist). M3 D10
+    training checkpoints use ``front`` and ``wrist``. If a checkpoint already
+    expects the env-native names, no map is required. Any other layout is
+    rejected rather than guessed so evaluation cannot silently feed cameras to
+    the wrong policy inputs.
+    """
+    visuals = _checkpoint_visual_features(checkpoint)
+    expected = set(visuals)
+    source = set(ENV_VISUAL_KEYS)
+    canonical = set(CANONICAL_D10_VISUAL_KEYS)
+    if expected == source:
+        return {}
+    if expected == canonical:
+        return {
+            ENV_VISUAL_KEYS[0]: CANONICAL_D10_VISUAL_KEYS[0],
+            ENV_VISUAL_KEYS[1]: CANONICAL_D10_VISUAL_KEYS[1],
+        }
+    raise RuntimeError(
+        "unsupported checkpoint visual feature layout for M3 LIBERO evaluation: "
+        f"{list(visuals)}; expected either {list(ENV_VISUAL_KEYS)} or {list(CANONICAL_D10_VISUAL_KEYS)}"
+    )
 
 
 def main() -> int:
@@ -55,6 +106,23 @@ def main() -> int:
     if args.episodes <= 0:
         raise ValueError("episodes must be positive")
     runtime = validate_runtime(args.model, args.source_root)
+
+    checkpoint = Path(str(training["checkpoint_ref"])).resolve()
+    if not checkpoint.is_dir():
+        raise FileNotFoundError(f"LeRobot checkpoint missing: {checkpoint}")
+    visual_features = _checkpoint_visual_features(checkpoint)
+    rename_map = _camera_rename_map(checkpoint)
+    print(
+        json.dumps(
+            {
+                "model": args.model,
+                "checkpoint_visual_features": list(visual_features),
+                "camera_rename_map": rename_map,
+            },
+            sort_keys=True,
+        ),
+        flush=True,
+    )
 
     module = importlib.import_module("lerobot.scripts.lerobot_eval")
     original_rollout = module.rollout
@@ -148,6 +216,8 @@ def main() -> int:
         f"--seed={args.seed}",
         f"--output_dir={args.output_dir / 'upstream'}",
     ]
+    if rename_map:
+        cli.append(f"--rename_map={json.dumps(rename_map, separators=(',', ':'))}")
     if args.model == "pi05":
         cli.append("--policy.n_action_steps=10")
     old_argv = sys.argv
