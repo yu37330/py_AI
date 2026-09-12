@@ -26,3 +26,15 @@ def test_camera_rename_is_fail_closed_instead_of_guessing_unknown_layouts():
     assert "expected == source" in text
     assert "expected == canonical" in text
     assert "raise RuntimeError" in text
+
+
+def test_lerobot_upstream_output_directory_exists_before_upstream_main_runs():
+    root = Path(__file__).resolve().parents[1]
+    text = (root / "tools/benchmark/m3_lerobot_eval_entry.py").read_text(encoding="utf-8")
+
+    mkdir = 'upstream_dir.mkdir(parents=True, exist_ok=True)'
+    invoke = 'module.main()'
+    assert 'upstream_dir = args.output_dir / "upstream"' in text
+    assert mkdir in text
+    assert 'f"--output_dir={upstream_dir}"' in text
+    assert text.index(mkdir) < text.index(invoke)
