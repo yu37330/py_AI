@@ -126,12 +126,17 @@ def test_runtime_guard_requires_opt_in_a100_and_pinned_source():
         assert token in guard
 
 
-def test_entries_enforce_300_hard_reset_and_instrument_upstream_rollout():
+def test_entries_enforce_300_compatible_hard_reset_and_instrument_upstream_rollout():
     root = Path(__file__).resolve().parents[1]
     lerobot_entry = (root / "tools/benchmark/m3_lerobot_eval_entry.py").read_text()
     openvla_entry = (root / "tools/benchmark/m3_openvla_eval_entry.py").read_text()
     assert "--env.episode_length=300" in lerobot_entry
-    assert "--env.hard_reset=true" in lerobot_entry
+    # π0.5 uses LeRobot v0.4.4, whose LiberoEnv has no hard_reset CLI field.
+    # Hard reset remains enabled by the underlying hf-libero/robosuite default.
+    assert '"--env.hard_reset=true",' not in lerobot_entry
+    assert "v0.4.4" in lerobot_entry
+    assert 'eval_kwargs["max_episodes_rendered"] = 0' in lerobot_entry
+    assert 'eval_kwargs["videos_dir"] = None' in lerobot_entry
     assert "instrument_select_action" in lerobot_entry
     assert "done_indices" in lerobot_entry
     assert "validate_runtime(args.model" in lerobot_entry
