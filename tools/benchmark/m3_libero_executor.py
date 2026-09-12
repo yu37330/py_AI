@@ -181,7 +181,11 @@ def execute_jobs(jobs: list[dict[str, Any]], *, mode: str) -> list[dict[str, Any
     if mode == "preflight":
         raise RuntimeError("preflight never executes simulator jobs")
     env = os.environ.copy()
-    env.setdefault("MUJOCO_GL", "egl")
+    # Never inherit Colab/Jupyter GUI backends into isolated model runtimes.
+    # Force the same headless graphics contract used by Notebook 74.
+    env["MPLBACKEND"] = "Agg"
+    env["MUJOCO_GL"] = "egl"
+    env["PYOPENGL_PLATFORM"] = "egl"
     env.setdefault("WANDB_DISABLED", "true")
     env.setdefault("WANDB_MODE", "disabled")
     records: list[dict[str, Any]] = []
