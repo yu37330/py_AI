@@ -85,6 +85,12 @@ def _run_job(command: list[str], *, cwd: Path, log_path: Path) -> list[dict[str,
     return episodes
 
 
+def _validate_attempt(value: str) -> str:
+    if not value or any(ch not in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_" for ch in value):
+        raise ValueError("PARC_M3_SIM_SMOKE_ATTEMPT may contain only letters, digits, '-' and '_'")
+    return value
+
+
 def main() -> int:
     if os.environ.get("PARC_M3_EXECUTE") != "1":
         raise RuntimeError("minimal simulator smoke requires explicit PARC_M3_EXECUTE=1")
@@ -92,8 +98,9 @@ def main() -> int:
     repo = Path(os.environ.get("PY_AI_REPO", Path(__file__).resolve().parents[2])).resolve()
     parc_root = Path(os.environ.get("PARC_ROOT", "/content/parc2026"))
     drive = Path(os.environ.get("PARC_DRIVE_ROOT", "/content/drive/MyDrive/parc2026-cache"))
+    attempt = _validate_attempt(os.environ.get("PARC_M3_SIM_SMOKE_ATTEMPT", "1"))
     smoke_summary_path = drive / "model-benchmark-v1/m3-training-smoke-v1/m3_training_smoke_summary.json"
-    output_root = drive / "model-benchmark-v1/m3-simulator-minimal-smoke-v1"
+    output_root = drive / f"model-benchmark-v1/m3-simulator-minimal-smoke-v1/attempt-{attempt}"
     summary_path = output_root / "m3_minimal_simulator_smoke_summary.json"
 
     if not smoke_summary_path.is_file():
@@ -122,7 +129,8 @@ def main() -> int:
         model_root = output_root / model
         if model_root.exists() and any(model_root.iterdir()) and not summary_path.is_file():
             raise RuntimeError(
-                f"partial minimal simulator smoke output exists: {model_root}; preserved for diagnosis"
+                f"partial minimal simulator smoke output exists: {model_root}; preserved for diagnosis. "
+                "Use a new PARC_M3_SIM_SMOKE_ATTEMPT instead of deleting evidence."
             )
 
         finalizer = repo / "tools/benchmark/m3_openvla_finalize_checkpoint.py"
@@ -161,7 +169,10 @@ def main() -> int:
                     episodes.extend(current)
                     continue
                 if out.exists() and any(out.iterdir()):
-                    raise RuntimeError(f"partial minimal simulator smoke output exists: {out}; preserved for diagnosis")
+                    raise RuntimeError(
+                        f"partial minimal simulator smoke output exists: {out}; preserved for diagnosis. "
+                        "Use a new PARC_M3_SIM_SMOKE_ATTEMPT instead of deleting evidence."
+                    )
                 if model in {"pi05", "smolvla"}:
                     entry = repo / "tools/benchmark/m3_lerobot_eval_entry.py"
                     command = [
@@ -232,9 +243,10 @@ def main() -> int:
     if sum(item["episode_count"] for item in model_summaries) != EXPECTED_TOTAL:
         raise RuntimeError("minimal simulator smoke total episode count mismatch")
     summary = {
-        "schema_version": 1,
+        "schema_version": 2,
         "stage": "M3_minimal_simulator_smoke",
         "status": "PASS",
+        "attempt": attempt,
         "selected_episode_ids_sha256": D10_HASH,
         "training_checkpoint_scope": "notebook73_forward_equal_data_smoke_only",
         "suite": SUITE,
@@ -253,6 +265,7 @@ def main() -> int:
     print("=== 74 M3 MINIMAL SIMULATOR SMOKE: PASS ===", flush=True)
     print(json.dumps({
         "status": "PASS",
+        "attempt": attempt,
         "episode_count": EXPECTED_TOTAL,
         "models": MODELS,
         "summary": str(summary_path),
