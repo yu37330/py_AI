@@ -57,14 +57,7 @@ def _checkpoint_visual_features(checkpoint: Path) -> tuple[str, ...]:
 
 
 def _camera_rename_map(checkpoint: Path) -> dict[str, str]:
-    """Resolve the frozen LIBERO env camera keys against checkpoint feature names.
-
-    hf-libero emits ``image`` (agent/front) and ``image2`` (wrist). M3 D10
-    training checkpoints use ``front`` and ``wrist``. If a checkpoint already
-    expects the env-native names, no map is required. Any other layout is
-    rejected rather than guessed so evaluation cannot silently feed cameras to
-    the wrong policy inputs.
-    """
+    """Resolve the frozen LIBERO env camera keys against checkpoint feature names."""
     visuals = _checkpoint_visual_features(checkpoint)
     expected = set(visuals)
     source = set(ENV_VISUAL_KEYS)
@@ -80,6 +73,18 @@ def _camera_rename_map(checkpoint: Path) -> dict[str, str]:
         "unsupported checkpoint visual feature layout for M3 LIBERO evaluation: "
         f"{list(visuals)}; expected either {list(ENV_VISUAL_KEYS)} or {list(CANONICAL_D10_VISUAL_KEYS)}"
     )
+
+
+def _write_progress(path: Path, *, runtime: dict, records: list[dict], status: str) -> None:
+    """Persist small attempt-scoped evidence after every completed task rollout."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "status": status,
+        "episode_count": len(records),
+        "runtime": runtime,
+        "episodes": records,
+    }
+    path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
 
 
 def main() -> int:
@@ -128,6 +133,7 @@ def main() -> int:
     original_rollout = module.rollout
     original_eval_policy_all = getattr(module, "eval_policy_all", None)
     records: list[dict] = []
+    progress_out = args.records_out.with_name(args.records_out.stem + ".partial.json")
 
     def instrumented_rollout(*rollout_args, **rollout_kwargs):
         env = rollout_kwargs.get("env")
@@ -184,6 +190,7 @@ def main() -> int:
             record["gpu_name"] = runtime["gpu_name"]
             record["gpu_vram_mib"] = runtime["gpu_vram_mib"]
             records.append(record)
+            _write_progress(progress_out, runtime=runtime, records=records, status="RUNNING")
         return rollout_data
 
     def no_video_eval_policy_all(*eval_args, **eval_kwargs):
@@ -237,11 +244,11 @@ def main() -> int:
         raise RuntimeError(
             f"LeRobot episode record count mismatch for {args.suite}: {len(records)} != {expected}"
         )
-    args.records_out.parent.mkdir(parents=True, exist_ok=True)
-    args.records_out.write_text(
-        json.dumps({"runtime": runtime, "episodes": records}, indent=2) + "\n",
-        encoding="utf-8",
-    )
+    _write_progress(args.records_out, runtime=runtime, records=records, status="PASS")
+    try:
+        progress_out.unlink(missing_ok=True)
+    except OSError as exc:
+        print(f"WARNING: could not remove partial progress marker {progress_out}: {exc}", file=sys.stderr, flush=True)
     print(json.dumps({
         "status": "PASS",
         "model": args.model,
