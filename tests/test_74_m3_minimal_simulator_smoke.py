@@ -3,7 +3,7 @@ import json
 from pathlib import Path
 
 
-NOTEBOOK_PIN = "1277e504013c329635702954bd8787e34ac8d550"
+NOTEBOOK_PIN = "9b1719c6f9e67c954d9da1f25044a00a2cd3af03"
 
 
 def _notebook_code(root: Path) -> str:
@@ -19,9 +19,14 @@ def test_notebook74_is_pinned_and_runs_runtime_setup_before_smoke():
     root = Path(__file__).resolve().parents[1]
     code = _notebook_code(root)
     assert NOTEBOOK_PIN in code
+    assert "ATTEMPT = '2'" in code
+    assert "prepare_m3_libero_noninteractive_config.py" in code
     assert "prepare_m3_simulator_runtimes.py" in code
     assert "run_m3_minimal_simulator_smoke.py" in code
+    assert code.index("prepare_m3_libero_noninteractive_config.py") < code.index("prepare_m3_simulator_runtimes.py")
     assert code.index("prepare_m3_simulator_runtimes.py") < code.index("run_m3_minimal_simulator_smoke.py")
+    assert "LIBERO_CONFIG_PATH" in code
+    assert "m3-libero-config/shared" in code
     assert "PARC_M3_EXECUTE" in code
     assert "PARC_M3_SIM_SMOKE_ATTEMPT" in code
     assert "HF_TOKEN" in code
@@ -29,6 +34,17 @@ def test_notebook74_is_pinned_and_runs_runtime_setup_before_smoke():
     assert "m3_minimal_simulator_smoke_summary.json" in code
     assert "latest eval log" in code
     assert "attempt-{ATTEMPT}" in code
+
+
+def test_noninteractive_libero_config_helper_is_syntax_valid_and_prompt_free():
+    root = Path(__file__).resolve().parents[1]
+    path = root / "tools/colab/prepare_m3_libero_noninteractive_config.py"
+    text = path.read_text(encoding="utf-8")
+    ast.parse(text, filename=str(path))
+    assert "LIBERO_CONFIG_PATH" in text
+    assert "vendor/libero-openvla-m3/libero/libero" in text
+    assert '"interactive_prompt_allowed": False' in text
+    assert "input(" not in text
 
 
 def test_simulator_runtime_setup_is_syntax_valid_and_does_not_rerun_probes_or_benchmark():
