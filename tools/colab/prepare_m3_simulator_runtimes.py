@@ -247,15 +247,32 @@ def _write_libero_config(source: Path) -> None:
     )
 
 
+def _install_source_pth(python_bin: Path, source: Path, log: Path) -> None:
+    """Expose a pinned source checkout without mutating that checkout.
+
+    The pinned LIBERO revision has setup.py at repository root but its importable
+    package lives under libero/libero while the outer libero directory is a
+    namespace directory. Its legacy setup.py uses find_packages(), so an editable
+    install can create libero distribution metadata without making `import libero`
+    available. A venv-local .pth keeps the checkout byte-for-byte pinned and makes
+    that namespace root importable for both setup verification and later eval jobs.
+    """
+    code = (
+        "import pathlib,site,sys; "
+        "root=pathlib.Path(sys.argv[1]).resolve(); "
+        "target=pathlib.Path(site.getsitepackages()[0])/'parc_m3_pinned_libero.pth'; "
+        "target.write_text(str(root)+'\\n', encoding='utf-8'); "
+        "print('pinned_libero_pth=' + str(target)); "
+        "print('pinned_libero_root=' + str(root))"
+    )
+    _run([str(python_bin), "-c", code, str(source)], log=log)
+
+
 def _install_openvla_libero(root: Path, log: Path) -> None:
     _ensure_uv(log)
     openvla_source, python_bin = _runtime_paths(root)["openvla_oft"]
     libero_source = _checkout_openvla_libero(root, log)
     _write_libero_config(libero_source)
-    _run(
-        ["uv", "pip", "install", "--python", str(python_bin), "-e", str(libero_source)],
-        log=log,
-    )
     _run(
         [
             "uv",
@@ -272,19 +289,21 @@ def _install_openvla_libero(root: Path, log: Path) -> None:
         ],
         log=log,
     )
+    _install_source_pth(python_bin, libero_source, log)
     env = {
         "PYTHONPATH": str(openvla_source),
     }
+    verify_code = (
+        "import pathlib,sys; import libero, libero.libero, robosuite; "
+        "expected=(pathlib.Path(sys.argv[1])/'libero/libero/__init__.py').resolve(); "
+        "got=pathlib.Path(libero.libero.__file__).resolve(); "
+        "assert got == expected, f'LIBERO import path mismatch: {got} != {expected}'; "
+        "import experiments.robot.libero.run_libero_eval; "
+        "print('openvla_libero_source=' + str(got)); "
+        "print('openvla_libero_import_ok')"
+    )
     _run(
-        [
-            str(python_bin),
-            "-c",
-            (
-                "import libero, robosuite; "
-                "import experiments.robot.libero.run_libero_eval; "
-                "print('openvla_libero_import_ok')"
-            ),
-        ],
+        [str(python_bin), "-c", verify_code, str(libero_source)],
         log=log,
         cwd=openvla_source,
         env=env,
