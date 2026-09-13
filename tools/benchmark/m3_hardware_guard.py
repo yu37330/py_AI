@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import os
+import subprocess
 
 
 @dataclass(frozen=True)
@@ -32,6 +33,25 @@ PROFILES = {
         min_vram_mib=90_000,
     ),
 }
+
+
+def query_gpu_info() -> tuple[str, int]:
+    """Return raw GPU identity without imposing the historical A100 contract.
+
+    Historical 72 probe code keeps using m3_batch_probe_common.gpu_info(), which
+    intentionally remains A100-only. Organizer wrappers must call this function
+    first and then validate the explicitly selected hardware profile.
+    """
+    name = subprocess.check_output(
+        ["nvidia-smi", "--query-gpu=name", "--format=csv,noheader"], text=True
+    ).strip().splitlines()[0]
+    total = int(
+        subprocess.check_output(
+            ["nvidia-smi", "--query-gpu=memory.total", "--format=csv,noheader,nounits"],
+            text=True,
+        ).strip().splitlines()[0]
+    )
+    return name, total
 
 
 def selected_profile() -> HardwareProfile:
