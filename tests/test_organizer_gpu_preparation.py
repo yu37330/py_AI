@@ -38,6 +38,17 @@ def test_base_runtime_setup_routes_organizer_profile_before_a100_path():
     assert "PARC_PERSIST_ROOT" in text
 
 
+def test_organizer_runtime_setup_verifies_sm120_for_all_three_models():
+    text = _text("tools/colab/prepare_m3_organizer_training_runtimes.py")
+    assert "prepare_m3_openvla_blackwell_runtime.py" in text
+    assert "torch.cuda.get_device_capability" in text
+    assert "sm_120" in text
+    assert "cuda >= (12,8)" in text
+    assert "m3_model_adapters" in text
+    assert '"probes_rerun": False' in text
+    assert '"benchmark_training_started": False' in text
+
+
 def test_handoff_builder_is_checksum_scoped_and_excludes_dataset():
     text = _text("tools/benchmark/build_m3_organizer_handoff.py")
     assert "D10_MANIFEST_SHA256" in text
