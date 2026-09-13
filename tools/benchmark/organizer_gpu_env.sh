@@ -5,6 +5,8 @@
 #   source tools/benchmark/organizer_gpu_env.sh
 #
 # This file never stores secrets. Set HF_TOKEN in the current shell separately.
+# Important: sourcing this file must not write into ~/data before a resumed
+# session has run `parc-home-sync data-pull`.
 
 if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
   echo "ERROR: source this file instead of executing it:" >&2
@@ -43,9 +45,10 @@ export TOKENIZERS_PARALLELISM="${TOKENIZERS_PARALLELISM:-false}"
 export WANDB_MODE="${WANDB_MODE:-disabled}"
 export WANDB_DISABLED="${WANDB_DISABLED:-true}"
 
+# Do not mkdir PARC_PERSIST_ROOT here. A resumed session must be able to run
+# data-pull before the local ~/data tree is touched. Scratch is safe to create.
 mkdir -p \
   "$PARC_LOCAL_SCRATCH_ROOT" \
-  "$PARC_PERSIST_ROOT" \
   "$HF_HOME" "$TORCH_HOME" "$XDG_CACHE_HOME" \
   "$UV_CACHE_DIR" "$PIP_CACHE_DIR" "$TMPDIR"
 
