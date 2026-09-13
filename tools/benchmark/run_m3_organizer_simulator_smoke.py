@@ -29,6 +29,7 @@ D10_HASH = "73ed0d3b0c5e73c745c0aa2e81517ce1fa40240c75f9eb040d65b6876ba08239"
 TRAINING_SCHEDULE_SEED = 20260906
 MODELS = ("pi05", "smolvla", "openvla_oft")
 ARTIFACT_MARKER = "model-benchmark-v1"
+ORGANIZER_HARDWARE_PROFILE = "organizer_rtx_pro_6000_blackwell"
 
 
 def _load(path: Path) -> dict[str, Any]:
@@ -205,11 +206,23 @@ def main() -> int:
     inventory_path = migration_root / "environment_inventory.json"
     handoff_path = migration_root / "handoff_validation.json"
 
+    # Fail closed on an unexpected GPU or reduced VRAM slice before building any runtime.
+    sys.path.insert(0, str(repo))
+    os.environ["PARC_M3_HARDWARE_PROFILE"] = ORGANIZER_HARDWARE_PROFILE
+    from tools.benchmark.m3_batch_probe_common import gpu_info  # noqa: PLC0415
+    from tools.benchmark.m3_hardware_guard import validate_hardware  # noqa: PLC0415
+
+    gpu_name, gpu_vram_mib = gpu_info()
+    hardware_profile = validate_hardware(gpu_name, gpu_vram_mib)
+
     inventory = {
         "schema_version": 1,
         "stage": "M3_organizer_environment_inventory",
         "status": "CAPTURED",
         "source_sha": source_sha,
+        "hardware_profile": hardware_profile.name,
+        "gpu_name": gpu_name,
+        "gpu_vram_mib": gpu_vram_mib,
         "local_scratch": _disk(local_root),
         "persistent_storage": _disk(persist_root),
         "nvidia_smi": _command_text(
@@ -226,24 +239,38 @@ def main() -> int:
     }
     inventory_path.write_text(json.dumps(inventory, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
-    handoff = _validate_handoff(persist_root)
-    handoff_path.write_text(json.dumps(handoff, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-
     env = os.environ.copy()
     env["PY_AI_REPO"] = str(repo)
     env["PARC_ROOT"] = str(local_root)
     env["PARC_DRIVE_ROOT"] = str(persist_root)  # legacy helper alias
     env["PARC_LOCAL_SCRATCH_ROOT"] = str(local_root)
     env["PARC_PERSIST_ROOT"] = str(persist_root)
+    env["PARC_M3_HARDWARE_PROFILE"] = ORGANIZER_HARDWARE_PROFILE
     env["PARC_M3_ALLOW_ARTIFACT_REBASE"] = "1"
     env["PARC_M3_SIM_SMOKE_ATTEMPT"] = attempt
     env["LIBERO_CONFIG_PATH"] = str(local_root / "m3-libero-config/shared")
     env.setdefault("HF_HOME", str(local_root / "cache/huggingface"))
     env.setdefault("TORCH_HOME", str(local_root / "cache/torch"))
     env.setdefault("XDG_CACHE_HOME", str(local_root / "cache"))
+    env.setdefault("UV_CACHE_DIR", str(local_root / "cache/uv"))
+    env.setdefault("PIP_CACHE_DIR", str(local_root / "cache/pip"))
+    env.setdefault("TMPDIR", str(local_root / "tmp"))
+    for key in ("HF_HOME", "TORCH_HOME", "XDG_CACHE_HOME", "UV_CACHE_DIR", "PIP_CACHE_DIR", "TMPDIR"):
+        Path(env[key]).mkdir(parents=True, exist_ok=True)
     env["MPLBACKEND"] = "Agg"
     env["MUJOCO_GL"] = "egl"
     env["PYOPENGL_PLATFORM"] = "egl"
+
+    # Verify every transferred byte before resolving Notebook73 checkpoint paths.
+    verify_args = ["tools/benchmark/verify_m3_organizer_handoff.py", "--root", str(persist_root)]
+    manifest_override = os.environ.get("PARC_M3_HANDOFF_MANIFEST")
+    if manifest_override:
+        verify_args.extend(["--manifest", manifest_override])
+    _run_helper(repo, env, *verify_args)
+
+    handoff = _validate_handoff(persist_root)
+    handoff["hardware_profile"] = hardware_profile.name
+    handoff_path.write_text(json.dumps(handoff, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
     status = {
         "schema_version": 1,
@@ -251,6 +278,7 @@ def main() -> int:
         "status": "RUNNING",
         "attempt": attempt,
         "source_sha": source_sha,
+        "hardware_profile": hardware_profile.name,
         "selected_episode_ids_sha256": D10_HASH,
         "probes_rerun": False,
         "benchmark_training_started": False,
