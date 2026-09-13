@@ -14,6 +14,7 @@ usage() {
   cat <<'EOF'
 Usage:
   bash tools/benchmark/organizer_gpu_cli.sh status
+  bash tools/benchmark/organizer_gpu_cli.sh progress
   bash tools/benchmark/organizer_gpu_cli.sh pull
   bash tools/benchmark/organizer_gpu_cli.sh preflight
   bash tools/benchmark/organizer_gpu_cli.sh restore
@@ -111,6 +112,11 @@ status() {
   echo "persistent: $PARC_PERSIST_ROOT"
   echo "dataset: $PARC_DATASET_ROOT"
   echo "attempt: $PARC_M3_BENCHMARK_ATTEMPT"
+}
+
+progress() {
+  check_repo_identity
+  python -u "$PY_AI_REPO/tools/benchmark/show_m3_organizer_progress.py"
 }
 
 pull_data() {
@@ -229,6 +235,7 @@ stop_ready() {
 cmd="${1:-}"
 case "$cmd" in
   status) status ;;
+  progress) progress ;;
   pull) pull_data ;;
   preflight) preflight ;;
   restore) restore_handoff ;;
