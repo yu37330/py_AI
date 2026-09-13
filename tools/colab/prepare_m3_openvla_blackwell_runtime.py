@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 """Prepare the pinned OpenVLA-OFT source on a Blackwell-capable PyTorch runtime.
 
-The upstream pinned source declares torch==2.2.0 and the historical A100 setup
-adds flash-attn==2.5.5. Those binaries predate Blackwell support. For the
-organizer RTX PRO 6000 Blackwell path, preserve the exact OpenVLA source commit
-and model logic while overriding only the hardware runtime to PyTorch 2.7.1 +
-CUDA 12.8. The M3 code does not request flash_attention_2, so the historical
-FlashAttention custom extension is intentionally absent on this profile.
+The upstream pinned source declares torch==2.2.0 and documents historical
+flash-attn==2.5.5 for the old stack. Those binaries predate Blackwell support.
+For the organizer RTX PRO 6000 Blackwell path, preserve the exact OpenVLA source
+commit/model logic while installing PyTorch 2.7.1 + CUDA 12.8 first and then the
+remaining pinned-source dependencies without ever installing the historical
+PyTorch trio or FlashAttention extension.
 """
 from __future__ import annotations
 
@@ -30,6 +30,37 @@ PROTOBUF_VERSION = "3.20.3"
 PANDAS_VERSION = "2.2.3"
 PYARROW_VERSION = "17.0.0"
 AV_VERSION = "12.3.0"
+
+# Exact non-hardware dependency set from the pinned upstream pyproject.toml.
+# The historical torch/torchvision/torchaudio requirements are intentionally
+# excluded and replaced by the Blackwell wheel trio above. flash-attn is not an
+# upstream project dependency at this revision (it is only a commented README
+# follow-up) and is deliberately not installed on this hardware profile.
+OPENVLA_NON_HARDWARE_DEPENDENCIES = (
+    "accelerate>=0.25.0",
+    "draccus==0.8.0",
+    "einops",
+    "huggingface_hub",
+    "json-numpy",
+    "jsonlines",
+    "matplotlib",
+    "peft==0.11.1",
+    "protobuf",
+    "rich",
+    "sentencepiece==0.1.99",
+    "timm==0.9.10",
+    "tokenizers==0.19.1",
+    "transformers @ git+https://github.com/moojink/transformers-openvla-oft.git",
+    "wandb",
+    "tensorflow==2.15.0",
+    "tensorflow_datasets==4.9.3",
+    "tensorflow_graphics==2021.12.3",
+    "dlimp @ git+https://github.com/moojink/dlimp_openvla",
+    "diffusers==0.30.3",
+    "imageio",
+    "uvicorn",
+    "fastapi",
+)
 
 
 def _run(cmd: list[str], *, log: Path, cwd: Path | None = None, check: bool = True) -> str:
@@ -70,8 +101,18 @@ def _checkout(source: Path, log: Path) -> None:
 def main() -> int:
     if os.environ.get("PARC_M3_HARDWARE_PROFILE") != "organizer_rtx_pro_6000_blackwell":
         raise RuntimeError("Blackwell OpenVLA runtime requires organizer hardware profile")
-    root = Path(os.environ.get("PARC_LOCAL_SCRATCH_ROOT", os.environ.get("PARC_ROOT", "/opt/dlami/nvme/parc2026"))).expanduser().resolve()
-    persist = Path(os.environ.get("PARC_PERSIST_ROOT", os.environ.get("PARC_DRIVE_ROOT", str(Path.home() / "data/parc2026-cache")))).expanduser().resolve()
+    root = Path(
+        os.environ.get(
+            "PARC_LOCAL_SCRATCH_ROOT",
+            os.environ.get("PARC_ROOT", "/opt/dlami/nvme/parc2026"),
+        )
+    ).expanduser().resolve()
+    persist = Path(
+        os.environ.get(
+            "PARC_PERSIST_ROOT",
+            os.environ.get("PARC_DRIVE_ROOT", str(Path.home() / "data/parc2026-cache")),
+        )
+    ).expanduser().resolve()
     source = root / "vendor/openvla-oft-m3"
     venv = root / "venv-openvla-oft-m3"
     log = persist / "model-benchmark-v1/m3-organizer-migration-v1/openvla_blackwell_runtime.log"
@@ -88,17 +129,18 @@ def main() -> int:
             _run(["uv", "venv", "--python", "3.10", str(venv)], log=log)
         python_bin = venv / "bin/python"
 
-        # Install the exact source dependency graph first. This temporarily pulls
-        # torch 2.2.0 as declared upstream; the next stage replaces only the
-        # hardware runtime wheels while leaving the source commit untouched.
-        stage = "source_dependencies"
-        _run(["uv", "pip", "install", "--python", str(python_bin), "-e", str(source)], log=log)
-
+        # Install Blackwell-capable torch first. We never install the pinned
+        # project's historical torch==2.2.0 / torchvision==0.17.0 / audio==2.2.0.
         stage = "blackwell_torch"
         _run(
             [
-                "uv", "pip", "install", "--python", str(python_bin),
-                "--index-url", TORCH_INDEX,
+                "uv",
+                "pip",
+                "install",
+                "--python",
+                str(python_bin),
+                "--index-url",
+                TORCH_INDEX,
                 f"torch=={TORCH_VERSION}",
                 f"torchvision=={TORCHVISION_VERSION}",
                 f"torchaudio=={TORCHAUDIO_VERSION}",
@@ -106,17 +148,53 @@ def main() -> int:
             log=log,
         )
 
-        # Historical flash-attn 2.5.5 custom kernels predate this hardware.
-        # M3 OpenVLA loading does not request flash_attention_2, so keep the
-        # Blackwell path on standard PyTorch attention rather than an unverified
-        # custom kernel extension.
+        stage = "source_non_hardware_dependencies"
+        _run(
+            [
+                "uv",
+                "pip",
+                "install",
+                "--python",
+                str(python_bin),
+                *OPENVLA_NON_HARDWARE_DEPENDENCIES,
+            ],
+            log=log,
+        )
+
+        # Expose the exact source checkout without allowing its historical
+        # hardware pins to enter the resolver.
+        stage = "source_editable_no_deps"
+        _run(
+            [
+                "uv",
+                "pip",
+                "install",
+                "--python",
+                str(python_bin),
+                "--no-deps",
+                "-e",
+                str(source),
+            ],
+            log=log,
+        )
+
+        # A reused scratch tree from a prior failed attempt must not retain an
+        # unverified historical custom CUDA extension.
         stage = "remove_historical_flash_attn"
-        _run(["uv", "pip", "uninstall", "--python", str(python_bin), "flash-attn"], log=log, check=False)
+        _run(
+            ["uv", "pip", "uninstall", "--python", str(python_bin), "flash-attn"],
+            log=log,
+            check=False,
+        )
 
         stage = "compat_pins"
         _run(
             [
-                "uv", "pip", "install", "--python", str(python_bin),
+                "uv",
+                "pip",
+                "install",
+                "--python",
+                str(python_bin),
                 f"tensorflow-metadata=={TF_METADATA_VERSION}",
                 f"protobuf=={PROTOBUF_VERSION}",
                 f"wandb=={WANDB_VERSION}",
@@ -154,8 +232,9 @@ def main() -> int:
             "capability": payload["capability"],
             "arch_list": payload["arch_list"],
             "device": payload["device"],
+            "historical_torch_installed": False,
             "historical_flash_attn_installed": False,
-            "source_dependency_torch_override": True,
+            "source_installed_no_deps": True,
             "benchmark_training_started": False,
         }
         status.parent.mkdir(parents=True, exist_ok=True)
@@ -178,7 +257,8 @@ def main() -> int:
                 },
                 indent=2,
                 sort_keys=True,
-            ) + "\n",
+            )
+            + "\n",
             encoding="utf-8",
         )
         with log.open("a", encoding="utf-8") as fh:
