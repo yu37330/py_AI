@@ -20,6 +20,13 @@ def out(*args: Any) -> None:
 
 
 def gpu_info() -> tuple[str, int]:
+    """Return GPU identity while preserving the historical A100 probe guard.
+
+    72/73 historical probe code calls this helper with no organizer profile and
+    therefore remains A100-only. Organizer launchers set the explicit Blackwell
+    profile before calling it; in that case the generic identity is returned and
+    the dedicated m3_hardware_guard performs the Blackwell fail-closed checks.
+    """
     name = subprocess.check_output(
         ["nvidia-smi", "--query-gpu=name", "--format=csv,noheader"], text=True
     ).strip().splitlines()[0]
@@ -29,6 +36,9 @@ def gpu_info() -> tuple[str, int]:
             text=True,
         ).strip().splitlines()[0]
     )
+    profile = os.environ.get("PARC_M3_HARDWARE_PROFILE", "colab_a100").strip()
+    if profile == "organizer_rtx_pro_6000_blackwell":
+        return name, total
     if "A100" not in name or total < 38000:
         raise RuntimeError(f"M3 batch probe requires NVIDIA A100 with >=38 GiB VRAM; got {name} {total} MiB")
     return name, total
