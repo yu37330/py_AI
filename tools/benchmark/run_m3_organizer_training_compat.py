@@ -4,13 +4,15 @@
 This is separate evidence from the historical 72/73 A100 probes. It consumes
 the same frozen D10, schedule, 72d batch configuration, and 69c OpenVLA stream,
 but runs only forward/equal-data smoke (64 samples, 2 optimizer updates/model).
-It must never overwrite 72/73 evidence or start the 1800-second benchmark.
+Compatibility checkpoints remain on ephemeral NVMe; only compact evidence is
+persisted. It must never overwrite 72/73 evidence or start the benchmark.
 """
 from __future__ import annotations
 
 import json
 import os
 from pathlib import Path
+import shutil
 import subprocess
 import sys
 from typing import Any
@@ -101,15 +103,26 @@ def main() -> int:
     if Path(str(dataset_ready.get("dataset_root") or "")).resolve() != dataset:
         raise RuntimeError("PARC_DATASET_ROOT differs from dataset readiness evidence")
 
+    evidence_root = persist / f"model-benchmark-v1/m3-organizer-training-compat-v1/attempt-{compat_attempt}"
+    summary_path = evidence_root / "m3_organizer_training_compat_summary.json"
+    if summary_path.is_file():
+        existing = _load(summary_path)
+        if (
+            existing.get("status") == "PASS"
+            and existing.get("stage") == "M3_organizer_training_compatibility"
+            and existing.get("selected_episode_ids_sha256") == D10_HASH
+            and existing.get("ready_for_75") is True
+        ):
+            print("=== M3 ORGANIZER TRAINING COMPATIBILITY: REUSE PASS ===", flush=True)
+            print(json.dumps(existing, indent=2, sort_keys=True), flush=True)
+            return 0
+        raise RuntimeError(f"existing compatibility summary is not reusable PASS: {summary_path}")
+
     os.environ["PARC_M3_HARDWARE_PROFILE"] = HARDWARE_PROFILE
     sys.path.insert(0, str(repo))
     from tools.benchmark.m3_batch_probe_common import gpu_info  # noqa: PLC0415
     from tools.benchmark.m3_hardware_guard import validate_hardware  # noqa: PLC0415
-    from tools.benchmark.m3_model_adapters import (  # noqa: PLC0415
-        build_run_specs,
-        load_batch_summary,
-        runtime_preflight,
-    )
+    from tools.benchmark.m3_model_adapters import build_run_specs, load_batch_summary  # noqa: PLC0415
 
     gpu_name, gpu_vram_mib = gpu_info()
     profile = validate_hardware(gpu_name, gpu_vram_mib)
@@ -121,6 +134,7 @@ def main() -> int:
     env["PARC_LOCAL_SCRATCH_ROOT"] = str(root)
     env["PARC_PERSIST_ROOT"] = str(persist)
     env["PARC_DATASET_ROOT"] = str(dataset)
+    env["PARC_DRIVE_DATASET"] = str(dataset)
     env["PARC_M3_HARDWARE_PROFILE"] = HARDWARE_PROFILE
     env.setdefault("HF_HOME", str(root / "cache/huggingface"))
     env.setdefault("TORCH_HOME", str(root / "cache/torch"))
@@ -131,7 +145,6 @@ def main() -> int:
     for key in ("HF_HOME", "TORCH_HOME", "XDG_CACHE_HOME", "UV_CACHE_DIR", "PIP_CACHE_DIR", "TMPDIR"):
         Path(env[key]).mkdir(parents=True, exist_ok=True)
 
-    # Fresh organizer sessions lose NVMe, so runtimes are reconstructible setup.
     subprocess.run(
         [sys.executable, "-u", str(repo / "tools/colab/prepare_m3_training_runtimes.py")],
         cwd=str(repo),
@@ -143,8 +156,7 @@ def main() -> int:
     schedule_path = persist / f"model-benchmark-v1/m3-schedules-v1/m3_equal_data_seed-{TRAINING_SCHEDULE_SEED}.json"
     manifest = persist / "pi05-ablation-group-aware-v2/dataset_ablation_manifests_v2_group_aware/V2_SQRT_BALANCED_RAW.json"
     streaming_contract = persist / "openvla-streaming-selected-v1/streaming_bridge_contract.json"
-    output_root = persist / f"model-benchmark-v1/m3-organizer-training-compat-v1/attempt-{compat_attempt}"
-    summary_path = output_root / "m3_organizer_training_compat_summary.json"
+    work_root = root / f"work/m3-organizer-training-compat-v1/attempt-{compat_attempt}"
 
     batch_summary = load_batch_summary(batch_summary_path)
     specs = build_run_specs(
@@ -153,7 +165,7 @@ def main() -> int:
         batch_summary_path=batch_summary_path,
         dataset_root=dataset,
         manifest_path=manifest,
-        output_root=output_root,
+        output_root=work_root,
         root=root,
         repo=repo,
         track="equal_data",
@@ -163,32 +175,39 @@ def main() -> int:
     )
     if tuple(spec["model"] for spec in specs) != MODELS:
         raise RuntimeError("organizer training compatibility model order drift")
-    blockers: list[str] = []
-    for spec in specs:
-        blockers.extend(runtime_preflight(spec["runtime"], repo=repo, strict_files=True)) if "runtime" in spec else None
-    # build_run_specs serializes commands; runtime setup was already strict-checked
-    # by prepare_m3_training_runtimes.py. Execute only the frozen smoke commands.
 
     results: list[dict[str, Any]] = []
+    evidence_refs: list[dict[str, str]] = []
     for spec in specs:
         model = str(spec["model"])
         result_path = Path(spec["out"])
         if result_path.is_file():
-            results.append(_validate_result(result_path, model))
-            continue
-        checkpoint_dir = Path(spec["output_dir"])
-        if checkpoint_dir.exists() and any(checkpoint_dir.iterdir()):
-            raise RuntimeError(
-                f"partial organizer training compatibility output exists: {checkpoint_dir}; use a new attempt"
-            )
-        command = spec.get("command")
-        if not isinstance(command, list) or not command:
-            raise RuntimeError(f"missing compatibility training command for {model}")
-        log = result_path.parent / "train.log"
-        log.parent.mkdir(parents=True, exist_ok=True)
-        with log.open("w", encoding="utf-8") as fh:
-            subprocess.run(command, cwd=str(repo), env=env, stdout=fh, stderr=subprocess.STDOUT, check=True)
-        results.append(_validate_result(result_path, model))
+            result = _validate_result(result_path, model)
+        else:
+            checkpoint_dir = Path(spec["output_dir"])
+            if checkpoint_dir.exists() and any(checkpoint_dir.iterdir()):
+                raise RuntimeError(
+                    f"partial organizer training compatibility output exists: {checkpoint_dir}; use a new attempt"
+                )
+            command = spec.get("command")
+            if not isinstance(command, list) or not command:
+                raise RuntimeError(f"missing compatibility training command for {model}")
+            log = result_path.parent / "train.log"
+            log.parent.mkdir(parents=True, exist_ok=True)
+            with log.open("w", encoding="utf-8") as fh:
+                subprocess.run(command, cwd=str(repo), env=env, stdout=fh, stderr=subprocess.STDOUT, check=True)
+            result = _validate_result(result_path, model)
+
+        evidence_model = evidence_root / model
+        evidence_model.mkdir(parents=True, exist_ok=True)
+        evidence_result = evidence_model / "train_result.json"
+        evidence_log = evidence_model / "train.log"
+        shutil.copy2(result_path, evidence_result)
+        log_path = result_path.parent / "train.log"
+        if log_path.is_file():
+            shutil.copy2(log_path, evidence_log)
+        evidence_refs.append({"model": model, "train_result": str(evidence_result), "train_log": str(evidence_log)})
+        results.append(result)
 
     if len(results) != 3:
         raise RuntimeError("organizer training compatibility did not produce three PASS results")
@@ -208,6 +227,8 @@ def main() -> int:
         "optimizer_updates_per_model": 2,
         "effective_batch_size": 32,
         "model_count": 3,
+        "compatibility_checkpoint_storage": "ephemeral_local_scratch",
+        "persistent_evidence": evidence_refs,
         "historical_72_73_evidence_mutated": False,
         "benchmark_training_started": False,
         "ready_for_75": True,
@@ -218,7 +239,6 @@ def main() -> int:
                 "gradient_accumulation": r["gradient_accumulation"],
                 "peak_train_vram": r["metrics"]["peak_train_vram"],
                 "train_wall_time": r["metrics"]["train_wall_time"],
-                "checkpoint_ref": r["checkpoint_ref"],
             }
             for r in results
         ],
