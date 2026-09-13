@@ -122,7 +122,10 @@ def test_execution_runbook_uses_official_storage_roles_and_session_boundaries():
     assert "parc-home-sync data-push" in text
     assert "parc-home-sync data-pull" in text
     assert "最大12時間" in text
+    assert "build_m3_organizer_handoff.py" in text
+    assert "restore_m3_organizer_handoff.py" in text
     assert "run_m3_organizer_simulator_smoke.py" in text
+    assert "prepare_m3_organizer_dataset.py" in text
     assert "run_m3_organizer_training_compat.py" in text
     assert "run_m3_organizer_benchmark_order.py" in text
     assert "run_m3_organizer_screening_order.py" in text
