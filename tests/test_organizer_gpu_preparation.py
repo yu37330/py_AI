@@ -91,6 +91,8 @@ def test_organizer_launchers_keep_frozen_gates_and_persistent_boundary():
     compat = _text("tools/benchmark/run_m3_organizer_training_compat.py")
     benchmark = _text("tools/benchmark/run_m3_organizer_benchmark_order.py")
     screening = _text("tools/benchmark/run_m3_organizer_screening_order.py")
+    screening_unit = _text("tools/benchmark/run_m3_organizer_screening_unit.py")
+    screening_finalize = _text("tools/benchmark/finalize_m3_organizer_screening_order.py")
 
     assert "verify_m3_organizer_handoff.py" in simulator
     assert 'ORGANIZER_HARDWARE_PROFILE = "organizer_rtx_pro_6000_blackwell"' in simulator
@@ -113,9 +115,20 @@ def test_organizer_launchers_keep_frozen_gates_and_persistent_boundary():
     assert "total_episode_records" in screening
     assert "ready_for_forward_reverse_promotion" in screening
 
+    assert "SCREENING_EPISODES = 80" in screening_unit
+    assert "m3-screening-unit-staging-v1" in screening_unit
+    assert "shutil.move" in screening_unit
+    assert "unit-attempt" in screening_unit
+    assert "require_screening_episodes=True" in screening_unit
+
+    assert "CPU-only" in screening_finalize
+    assert "checkpoint_count" in screening_finalize
+    assert "total_episode_records" in screening_finalize
+    assert '"organizer_checkpoint_scoped_execution": True' in screening_finalize
+
 
 def test_execution_runbook_uses_official_storage_roles_and_session_boundaries():
-    text = _text("docs/PARC2026_ORGANIZER_GPU_EXECUTION_RUNBOOK_20260913.md")
+    text = _text("docs/PARC2026_ORGANIZER_GPU_EXECUTION_RUNBOOK_V2_20260913.md")
     assert "NVIDIA RTX PRO 6000 Blackwell" in text
     assert "/opt/dlami/nvme" in text
     assert "~/data" in text
@@ -128,4 +141,6 @@ def test_execution_runbook_uses_official_storage_roles_and_session_boundaries():
     assert "prepare_m3_organizer_dataset.py" in text
     assert "run_m3_organizer_training_compat.py" in text
     assert "run_m3_organizer_benchmark_order.py" in text
-    assert "run_m3_organizer_screening_order.py" in text
+    assert "run_m3_organizer_screening_unit.py" in text
+    assert "finalize_m3_organizer_screening_order.py" in text
+    assert "80 episodes" in text
