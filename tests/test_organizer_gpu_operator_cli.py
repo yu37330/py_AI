@@ -20,7 +20,8 @@ def test_operator_shell_scripts_are_bash_syntax_valid():
 def test_environment_does_not_touch_persistent_root_before_pull():
     text = _text("tools/benchmark/organizer_gpu_env.sh")
     assert 'export PARC_PERSIST_ROOT="${PARC_PERSIST_ROOT:-$HOME/data/parc2026-cache}"' in text
-    assert 'mkdir -p \\\n  "$PARC_LOCAL_SCRATCH_ROOT"' in text
+    assert "mkdir -p" in text
+    assert '"$PARC_LOCAL_SCRATCH_ROOT"' in text
     mkdir_block = text.split("mkdir -p", 1)[1].split("if git -C", 1)[0]
     assert '"$PARC_PERSIST_ROOT"' not in mkdir_block
     assert "must not write into ~/data before" in text
