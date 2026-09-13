@@ -6,7 +6,8 @@ def _text(rel: str) -> str:
     root = Path(__file__).resolve().parents[1]
     path = root / rel
     text = path.read_text(encoding="utf-8")
-    ast.parse(text, filename=str(path))
+    if path.suffix == ".py":
+        ast.parse(text, filename=str(path))
     return text
 
 
