@@ -83,8 +83,9 @@ def test_organizer_launchers_keep_frozen_gates_and_persistent_boundary():
 
     assert "verify_m3_organizer_handoff.py" in simulator
     assert 'ORGANIZER_HARDWARE_PROFILE = "organizer_rtx_pro_6000_blackwell"' in simulator
-    assert "episode_count") != 60" in simulator
-    assert '"promotion_evidence": False' not in simulator or "promotion_evidence" in simulator
+    assert 'summary.get("episode_count") != 60' in simulator
+    assert 'summary.get("promotion_evidence") is not False' in simulator
+    assert 'summary.get("benchmark_training_started") is not False' in simulator
 
     assert "samples_per_model" in compat
     assert "optimizer_updates_per_model" in compat
