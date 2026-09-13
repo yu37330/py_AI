@@ -5,12 +5,10 @@
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO="$(cd "$HERE/../.." && pwd)"
 # shellcheck disable=SC1091
 source "$HERE/organizer_gpu_env.sh"
 
 LOG_ROOT="$PARC_PERSIST_ROOT/operator-logs"
-mkdir -p "$LOG_ROOT"
 
 usage() {
   cat <<'EOF'
@@ -44,6 +42,7 @@ stamp() { date '+%Y%m%d_%H%M%S'; }
 
 run_logged() {
   local name="$1"; shift
+  mkdir -p "$LOG_ROOT"
   local log="$LOG_ROOT/$(stamp)_${name}.log"
   echo "=== $name ==="
   echo "log: $log"
@@ -116,7 +115,22 @@ status() {
 
 pull_data() {
   command -v parc-home-sync >/dev/null 2>&1 || { echo "ERROR: parc-home-sync not found" >&2; return 2; }
-  run_logged data_pull parc-home-sync data-pull
+  # Do not write under ~/data before data-pull. Keep the pull transcript in
+  # auto-persistent $HOME, then copy it under operator-logs only after success.
+  local bootstrap_log="$HOME/parc2026_data_pull_$(stamp).log"
+  echo "=== data_pull ==="
+  echo "bootstrap log: $bootstrap_log"
+  set +e
+  parc-home-sync data-pull 2>&1 | tee "$bootstrap_log"
+  local rc=${PIPESTATUS[0]}
+  set -e
+  if [[ $rc -ne 0 ]]; then
+    echo "FAILED rc=$rc; pull log preserved outside ~/data: $bootstrap_log" >&2
+    return "$rc"
+  fi
+  mkdir -p "$LOG_ROOT"
+  cp "$bootstrap_log" "$LOG_ROOT/$(basename "$bootstrap_log")"
+  echo "PASS: data_pull"
 }
 
 preflight() {
