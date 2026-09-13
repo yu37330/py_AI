@@ -37,6 +37,7 @@ def _write_status(path: Path, *, status: str, stage: str, error: str | None = No
         "status": status,
         "current_stage": stage,
         "selected_episode_ids_sha256": D10_HASH,
+        "hardware_profile": os.environ.get("PARC_M3_HARDWARE_PROFILE", "colab_a100"),
         "probes_rerun": False,
         "benchmark_training_started": False,
         "simulator_started": False,
@@ -172,8 +173,10 @@ def _prepare_training_runtimes(root: Path, repo: Path, drive: Path, log: Path) -
         raise FileNotFoundError(helper)
     env = {
         "PARC_ROOT": str(root),
+        "PARC_LOCAL_SCRATCH_ROOT": str(root),
         "PY_AI_REPO": str(repo),
         "PARC_DRIVE_ROOT": str(drive),
+        "PARC_PERSIST_ROOT": str(drive),
     }
     _run([sys.executable, "-u", str(helper)], log=log, cwd=repo, env=env)
 
@@ -329,9 +332,16 @@ def main() -> int:
     if not os.environ.get("HF_TOKEN"):
         raise RuntimeError("HF_TOKEN is required for simulator runtime setup")
 
-    root = Path(os.environ.get("PARC_ROOT", "/content/parc2026")).resolve()
-    repo = Path(os.environ.get("PY_AI_REPO", root / "py_AI_m3_minimal_sim_smoke")).resolve()
-    drive = Path(os.environ.get("PARC_DRIVE_ROOT", "/content/drive/MyDrive/parc2026-cache")).resolve()
+    root = Path(
+        os.environ.get("PARC_LOCAL_SCRATCH_ROOT", os.environ.get("PARC_ROOT", "/content/parc2026"))
+    ).expanduser().resolve()
+    repo = Path(os.environ.get("PY_AI_REPO", root / "py_AI_m3_minimal_sim_smoke")).expanduser().resolve()
+    drive = Path(
+        os.environ.get(
+            "PARC_PERSIST_ROOT",
+            os.environ.get("PARC_DRIVE_ROOT", "/content/drive/MyDrive/parc2026-cache"),
+        )
+    ).expanduser().resolve()
     out = drive / "model-benchmark-v1/m3-simulator-minimal-smoke-v1/runtime-setup"
     log = out / "runtime_setup.log"
     status = out / "runtime_setup_status.json"
@@ -346,10 +356,15 @@ def main() -> int:
         sys.path.insert(0, str(repo))
         from tools.benchmark.m3_batch_probe_common import gpu_info  # noqa: PLC0415
         from tools.benchmark.m3_eval_runtime_guard import verify_source_revision  # noqa: PLC0415
+        from tools.benchmark.m3_hardware_guard import validate_hardware  # noqa: PLC0415
 
         gpu_name, gpu_vram_mib = gpu_info()
-        if "A100" not in gpu_name or gpu_vram_mib < 38000:
-            raise RuntimeError(f"Notebook 74 requires one A100 >=38000 MiB, got {gpu_name} {gpu_vram_mib}")
+        hardware_profile = validate_hardware(gpu_name, gpu_vram_mib)
+        print(
+            f"M3 simulator hardware profile: {hardware_profile.name} "
+            f"gpu={gpu_name} vram_mib={gpu_vram_mib}",
+            flush=True,
+        )
 
         stage = "training_runtime_bootstrap"
         _write_status(status, status="RUNNING", stage=stage)

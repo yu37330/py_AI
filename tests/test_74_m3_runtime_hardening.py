@@ -53,21 +53,24 @@ def test_openvla_dematerializer_preserves_persistent_training_artifacts():
     assert 'result["checkpoint_eval_ready"] = False' in text
 
 
-def test_disk_headroom_cleanup_is_safe_and_fail_fast():
+def test_disk_headroom_cleanup_is_safe_generic_and_fail_fast():
     root = Path(__file__).resolve().parents[1]
     path = root / "tools/colab/prepare_m3_disk_headroom.py"
     text = path.read_text(encoding="utf-8")
     ast.parse(text, filename=str(path))
     assert 'LOCAL_MIN_FREE_GIB = 24.0' in text
-    assert 'DRIVE_MIN_FREE_GIB = 20.0' in text
+    assert 'PERSIST_MIN_FREE_GIB = 20.0' in text
+    assert 'PARC_LOCAL_SCRATCH_ROOT' in text
+    assert 'PARC_PERSIST_ROOT' in text
+    assert 'PARC_DRIVE_ROOT' in text
     assert '["uv", "cache", "clean"]' in text
     assert '"pip", "cache", "purge"' in text
     assert '["apt-get", "clean"]' in text
     assert '.cache/huggingface' in text
-    assert "Do not touch ~/.cache/huggingface" in text
-    assert "D10 data/manifests" in text
-    assert "insufficient local /content headroom" in text
-    assert "insufficient Google Drive headroom" in text
+    assert "Hugging Face cache" in text
+    assert "insufficient local scratch headroom" in text
+    assert "insufficient persistent-storage headroom" in text
+    assert "Do not delete D10/checkpoints/evidence" in text
 
 
 def test_evaluators_persist_attempt_scoped_partial_episode_evidence():

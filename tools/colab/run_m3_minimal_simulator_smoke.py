@@ -6,6 +6,11 @@ runs `libero_spatial`, all 10 tasks, one trial per task, for both frozen eval
 seeds: 20 episodes/model, 60 total. This validates checkpoint loading,
 simulator stepping, inference instrumentation, and OpenVLA JIT merge/cleanup.
 It is not promotion evidence and never starts training.
+
+When immutable Notebook73 artifacts are copied to another persistent root,
+PARC_M3_ALLOW_ARTIFACT_REBASE=1 permits checkpoint_ref to be rebased by the
+preserved `model-benchmark-v1/...` relative path. The original train_result.json
+is never modified; an attempt-local runtime view is written instead.
 """
 from __future__ import annotations
 
@@ -23,6 +28,7 @@ SEEDS = (20260906, 20260907)
 SUITE = "libero_spatial"
 EXPECTED_PER_MODEL = 20
 EXPECTED_TOTAL = 60
+ARTIFACT_MARKER = "model-benchmark-v1"
 
 
 def _load(path: Path) -> dict[str, Any]:
@@ -40,9 +46,9 @@ def _headless_env() -> dict[str, str]:
     return env
 
 
-def _training_path(drive: Path, model: str) -> Path:
+def _training_path(persist_root: Path, model: str) -> Path:
     return (
-        drive
+        persist_root
         / "model-benchmark-v1/m3-training-smoke-v1/forward/equal_data"
         / f"seed-{TRAINING_SCHEDULE_SEED}"
         / model
@@ -69,9 +75,69 @@ def _validate_training(path: Path, model: str) -> dict[str, Any]:
     for key, value in expected.items():
         if data.get(key) != value:
             raise RuntimeError(f"training smoke mismatch {path}: {key}={data.get(key)!r} != {value!r}")
-    if not Path(str(data.get("checkpoint_ref") or "")).exists():
-        raise FileNotFoundError(f"training smoke checkpoint missing: {data.get('checkpoint_ref')}")
+    if not str(data.get("checkpoint_ref") or ""):
+        raise RuntimeError(f"training smoke checkpoint_ref missing: {path}")
     return data
+
+
+def _resolve_checkpoint_ref(data: dict[str, Any], *, persist_root: Path) -> tuple[Path, bool]:
+    original = Path(str(data.get("checkpoint_ref") or "")).expanduser()
+    if original.exists():
+        return original.resolve(), False
+
+    if os.environ.get("PARC_M3_ALLOW_ARTIFACT_REBASE") != "1":
+        raise FileNotFoundError(
+            f"training smoke checkpoint missing: {original}. "
+            "For an explicit cross-filesystem migration set PARC_M3_ALLOW_ARTIFACT_REBASE=1."
+        )
+
+    parts = original.parts
+    try:
+        marker_index = parts.index(ARTIFACT_MARKER)
+    except ValueError as exc:
+        raise RuntimeError(
+            f"cannot safely rebase checkpoint_ref without {ARTIFACT_MARKER!r} path marker: {original}"
+        ) from exc
+
+    candidate = persist_root.joinpath(*parts[marker_index:]).resolve()
+    if not candidate.exists():
+        raise FileNotFoundError(
+            f"rebased training smoke checkpoint missing: original={original} candidate={candidate}"
+        )
+    return candidate, True
+
+
+def _prepare_training_view(
+    source_path: Path,
+    *,
+    model: str,
+    persist_root: Path,
+    output_root: Path,
+) -> tuple[dict[str, Any], Path, bool]:
+    data = _validate_training(source_path, model)
+    checkpoint, rebased = _resolve_checkpoint_ref(data, persist_root=persist_root)
+    if not rebased:
+        return data, source_path, False
+
+    # 移行先では元evidenceを書き換えず、attempt配下に実行用viewだけを作る。
+    view = dict(data)
+    original_ref = str(data["checkpoint_ref"])
+    view["checkpoint_ref"] = str(checkpoint)
+    view["artifact_relocation"] = {
+        "mode": "model-benchmark-relative-rebase",
+        "original_checkpoint_ref": original_ref,
+        "resolved_checkpoint_ref": str(checkpoint),
+        "source_train_result": str(source_path),
+        "source_train_result_mutated": False,
+    }
+    view_path = output_root / "_training_views" / model / "train_result.json"
+    view_path.parent.mkdir(parents=True, exist_ok=True)
+    view_path.write_text(json.dumps(view, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    print(
+        f"artifact rebase view: model={model} original={original_ref} resolved={checkpoint}",
+        flush=True,
+    )
+    return view, view_path, True
 
 
 def _run_job(command: list[str], *, cwd: Path, log_path: Path) -> list[dict[str, Any]]:
@@ -103,12 +169,19 @@ def main() -> int:
     if os.environ.get("PARC_M3_EXECUTE") != "1":
         raise RuntimeError("minimal simulator smoke requires explicit PARC_M3_EXECUTE=1")
 
-    repo = Path(os.environ.get("PY_AI_REPO", Path(__file__).resolve().parents[2])).resolve()
-    parc_root = Path(os.environ.get("PARC_ROOT", "/content/parc2026"))
-    drive = Path(os.environ.get("PARC_DRIVE_ROOT", "/content/drive/MyDrive/parc2026-cache"))
+    repo = Path(os.environ.get("PY_AI_REPO", Path(__file__).resolve().parents[2])).expanduser().resolve()
+    parc_root = Path(
+        os.environ.get("PARC_ROOT", os.environ.get("PARC_LOCAL_SCRATCH_ROOT", "/content/parc2026"))
+    ).expanduser().resolve()
+    persist_root = Path(
+        os.environ.get(
+            "PARC_PERSIST_ROOT",
+            os.environ.get("PARC_DRIVE_ROOT", "/content/drive/MyDrive/parc2026-cache"),
+        )
+    ).expanduser().resolve()
     attempt = _validate_attempt(os.environ.get("PARC_M3_SIM_SMOKE_ATTEMPT", "1"))
-    smoke_summary_path = drive / "model-benchmark-v1/m3-training-smoke-v1/m3_training_smoke_summary.json"
-    output_root = drive / f"model-benchmark-v1/m3-simulator-minimal-smoke-v1/attempt-{attempt}"
+    smoke_summary_path = persist_root / "model-benchmark-v1/m3-training-smoke-v1/m3_training_smoke_summary.json"
+    output_root = persist_root / f"model-benchmark-v1/m3-simulator-minimal-smoke-v1/attempt-{attempt}"
     summary_path = output_root / "m3_minimal_simulator_smoke_summary.json"
 
     if not smoke_summary_path.is_file():
@@ -127,10 +200,18 @@ def main() -> int:
     gpu_name, gpu_vram_mib = gpu_info()
     runtimes = default_eval_runtimes(parc_root)
     model_summaries: list[dict[str, Any]] = []
+    rebased_models: list[str] = []
 
     for model in MODELS:
-        training_path = _training_path(drive, model)
-        training = _validate_training(training_path, model)
+        source_training_path = _training_path(persist_root, model)
+        training, training_path, artifact_rebased = _prepare_training_view(
+            source_training_path,
+            model=model,
+            persist_root=persist_root,
+            output_root=output_root,
+        )
+        if artifact_rebased:
+            rebased_models.append(model)
         if training.get("source_ref") != SOURCE_REFS[model]:
             raise RuntimeError(f"training smoke source mismatch for {model}")
         runtime = runtimes[model]
@@ -214,9 +295,7 @@ def main() -> int:
                     ]
                 episodes.extend(_run_job(command, cwd=Path(runtime.command_root), log_path=log))
         finally:
-            # If this smoke created (or even only started creating) merged 7B
-            # weights, remove them on both success and failure. Never remove a
-            # merged checkpoint that already existed before this attempt.
+            # このattemptが作成開始したOpenVLA merged weightsだけをcleanupする。
             cleanup_needed = (
                 model == "openvla_oft"
                 and not merged_present_before
@@ -265,6 +344,8 @@ def main() -> int:
             "inference_latency": aggregate["metrics"]["inference_latency"],
             "peak_inference_vram": aggregate["metrics"]["peak_inference_vram"],
             "summary": str(model_summary_path),
+            "training_result_ref": str(training_path),
+            "artifact_rebased": artifact_rebased,
         })
 
     if sum(item["episode_count"] for item in model_summaries) != EXPECTED_TOTAL:
@@ -283,6 +364,9 @@ def main() -> int:
         "gpu_name": gpu_name,
         "gpu_vram_mib": gpu_vram_mib,
         "models": model_summaries,
+        "artifact_rebase_enabled": os.environ.get("PARC_M3_ALLOW_ARTIFACT_REBASE") == "1",
+        "artifact_rebased_models": rebased_models,
+        "source_training_results_mutated": False,
         "promotion_evidence": False,
         "benchmark_training_started": False,
         "final_800_episode_evaluation_started": False,

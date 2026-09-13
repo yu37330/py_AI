@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
-"""Rebuild the three pinned M3 training runtimes in a fresh Colab VM.
+"""Rebuild the three pinned M3 training runtimes.
 
-This is setup-only. It does not rerun 72a/72b/72c probes and never starts
-M3 smoke or benchmark training. Colab `/content` is ephemeral, so Notebook 73
-must be able to reconstruct the exact source checkouts/venvs from persistent
-72d/69c evidence without relying on a previous notebook session.
+The historical default remains the validated Colab/A100 setup. When
+PARC_M3_HARDWARE_PROFILE=organizer_rtx_pro_6000_blackwell, execution is routed
+to the dedicated Blackwell setup so old torch/FlashAttention binaries are not
+reused on the organizer GPU. This is setup-only and never reruns 72 probes or
+starts M3 training.
 """
 from __future__ import annotations
 
@@ -19,6 +20,7 @@ import traceback
 SMOL_REF = "3f2c29ef7e44b1ddccbcda3b6a63939e53639e9e"
 SMOL_URL = "https://github.com/huggingface/lerobot.git"
 OPENVLA_REF = "e4287e94541f459edc4feabc4e181f537cd569a8"
+ORGANIZER_PROFILE = "organizer_rtx_pro_6000_blackwell"
 
 
 def _write_status(path: Path, *, status: str, stage: str, error: str | None = None) -> None:
@@ -48,7 +50,7 @@ def _run(cmd: list[str], *, log: Path, cwd: Path | None = None, env: dict[str, s
         fh.flush()
         proc = subprocess.Popen(
             cmd,
-            cwd=cwd,
+            cwd=str(cwd) if cwd else None,
             env=child,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
@@ -149,9 +151,29 @@ def _prepare_openvla(root: Path, repo: Path, drive: Path, log: Path) -> None:
 
 
 def main() -> int:
-    root = Path(os.environ.get("PARC_ROOT", "/content/parc2026")).resolve()
-    repo = Path(os.environ.get("PY_AI_REPO", root / "py_AI_m3_training_smoke")).resolve()
-    drive = Path(os.environ.get("PARC_DRIVE_ROOT", "/content/drive/MyDrive/parc2026-cache")).resolve()
+    root = Path(
+        os.environ.get("PARC_LOCAL_SCRATCH_ROOT", os.environ.get("PARC_ROOT", "/content/parc2026"))
+    ).expanduser().resolve()
+    repo = Path(os.environ.get("PY_AI_REPO", root / "py_AI_m3_training_smoke")).expanduser().resolve()
+    drive = Path(
+        os.environ.get(
+            "PARC_PERSIST_ROOT",
+            os.environ.get("PARC_DRIVE_ROOT", "/content/drive/MyDrive/parc2026-cache"),
+        )
+    ).expanduser().resolve()
+
+    if os.environ.get("PARC_M3_HARDWARE_PROFILE") == ORGANIZER_PROFILE:
+        helper = repo / "tools/colab/prepare_m3_organizer_training_runtimes.py"
+        if not helper.is_file():
+            raise FileNotFoundError(helper)
+        subprocess.run(
+            [sys.executable, "-u", str(helper)],
+            cwd=str(repo),
+            env=os.environ.copy(),
+            check=True,
+        )
+        return 0
+
     setup_root = drive / "model-benchmark-v1/m3-training-smoke-v1/runtime-setup"
     log = setup_root / "runtime_setup.log"
     status = setup_root / "runtime_setup_status.json"
